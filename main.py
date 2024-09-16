@@ -1,12 +1,17 @@
 import logging
-import scraper.csfd
-import scraper.reddit
-import tempfile
-import click
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional
+
+import click
+
+import prepare_dataset
+import scraper.csfd
+import scraper.reddit
+
+TEMP_DIR = Path(tempfile.gettempdir()) / 'DP_541699'
 
 
 def to_path(ctx, param, value):
@@ -38,8 +43,14 @@ def scrape_reddit(output_dir: Optional[Path], user_agent: Optional[str]):
               required=False,
               type=str,
               help='Custom user agent.')
-def scrape_csfd(output_dir: Optional[Path], user_agent: Optional[str]):
-    csfd_scraper = scraper.csfd.CSFDScraper(output_dir, user_agent)
+@click.option('--resume',
+              required=False,
+              is_flag=True,
+              help='Continue scraping from the last saved state.')
+def scrape_csfd(output_dir: Optional[Path], user_agent: Optional[str], resume: bool):
+    csfd_scraper = scraper.csfd.CSFDScraper(TEMP_DIR / 'csfd', output_dir, user_agent)
+    if resume:
+        csfd_scraper.load_state()
     csfd_scraper.scrape()
 
 
@@ -52,13 +63,47 @@ scrape.add_command(scrape_reddit)
 scrape.add_command(scrape_csfd)
 
 
+@click.command(name='create-dataset')
+@click.option('-i', '--input-file',
+              required=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              help='Input file with scraped data.')
+@click.option('-o', '--output-dir',
+              required=False,
+              type=click.Path(file_okay=False, dir_okay=True, writable=True),
+              callback=to_path,
+              help='Output directory for processed dataset.')
+@click.option('-n', '--num-of-authors',
+              required=True,
+              type=int,
+              help='Number of authors to extract. Authors with the most texts are selected.')
+@click.option('-s', '--train-test-split',
+              required=False,
+              type=float,
+              default=0.75,
+              help='Ratio of texts used for training. Default is 0.75.')
+@click.option('--add-out-of-class',
+              required=False,
+              is_flag=True,
+              help='Add additional class with out-of-class texts.')
+@click.option('--add-text-features',
+              required=False,
+              is_flag=True,
+              help='Add text features to the dataset.')
+def create_dataset(input_file: Path, output_dir: Optional[Path], num_of_authors: int,
+                   train_test_split: float, add_out_of_class: bool, add_text_features: bool):
+    output_dir = output_dir or Path('datasets')
+    prepare_dataset.create(input_file, output_dir, num_of_authors, add_out_of_class,
+                           add_text_features, train_test_split)
+
+
 @click.group()
 @click.option('-v', '--verbose', count=True)
 def cli(verbose: int):
     """TODO: Add a docstring."""
-    temp_dir = Path(tempfile.gettempdir()) / 'DP_541699'
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    log_file = (temp_dir / f'{time.strftime("%y%m%d_%H%M%S")}.log').resolve()
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = (TEMP_DIR / f'{time.strftime("%y%m%d_%H%M%S")}.log').resolve()
 
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
@@ -75,7 +120,7 @@ def cli(verbose: int):
 
 
 cli.add_command(scrape)
-
+cli.add_command(create_dataset)
 
 if __name__ == "__main__":
     cli()

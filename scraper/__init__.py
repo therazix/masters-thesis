@@ -1,5 +1,5 @@
 import logging
-import pycld2 as cld2
+import langid
 from typing import Optional
 from pathlib import Path
 
@@ -26,11 +26,12 @@ class Scraper:
             return None
         if len(text) < MIN_AUTHOR_TEXT_LENGTH:
             return None
-        if check_language and not cls._is_czech_text(text):
+        if check_language and not cls._is_correct_lang(text):
             return None
         return text
 
     @classmethod
-    def _is_czech_text(cls, text: str) -> bool:
-        _, _, details = cld2.detect(text, bestEffort=True, hintLanguage='cs')
-        return details[0][1] == 'cs'
+    def _is_correct_lang(cls, text: str) -> bool:
+        lang, _ = langid.classify(text)
+        # Text is sometime wrongly classified as 'sk', so we also accept 'sk' language
+        return lang == 'cs' or lang == 'sk'

@@ -1,13 +1,17 @@
+import logging
 import math
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-from pathlib import Path
 from pandarallel import pandarallel
 
 pandarallel.initialize()
 pd.options.mode.chained_assignment = None
 
 CHARS = 'aábcčdďeéěfghiíjklmnňoópqrřsštťuúůvwxyýzž' + '0123456789' + '.!?"„“,:-();/&'
+
+LOGGER = logging.getLogger(__name__)
 
 
 def extract_style(text: str):
@@ -30,24 +34,31 @@ def extract_style(text: str):
 
 def insert_features(df: pd.DataFrame):
     df[['avg_len', 'len_text', 'len_words', 'num_short_w',
-      'per_digit', 'per_cap', 'f_0', 'f_1', 'f_2', 'f_3', 'f_4', 'f_5', 'f_6',
-      'f_7', 'f_8', 'f_9', 'f_10', 'f_11', 'f_12', 'f_13', 'f_14', 'f_15',
-      'f_16', 'f_17', 'f_18', 'f_19', 'f_20', 'f_21', 'f_22', 'f_23', 'f_24',
-      'f_25', 'f_26', 'f_27', 'f_28', 'f_29', 'f_30', 'f_31', 'f_32', 'f_33',
-      'f_34', 'f_35', 'f_36', 'f_37', 'f_38', 'f_39', 'f_40', 'f_41', 'f_42',
-      'f_43', 'f_44', 'f_45', 'f_46', 'f_47', 'f_48', 'f_49', 'f_50', 'f_51',
-      'f_52', 'f_53', 'f_54', 'f_55', 'f_56', 'f_57', 'f_58', 'f_59', 'f_60',
-      'f_61', 'f_62', 'f_63', 'f_64', 'richness']] = df['text'].parallel_apply(lambda x: extract_style(x))  # noqa
+        'per_digit', 'per_cap', 'f_0', 'f_1', 'f_2', 'f_3', 'f_4', 'f_5', 'f_6',
+        'f_7', 'f_8', 'f_9', 'f_10', 'f_11', 'f_12', 'f_13', 'f_14', 'f_15',
+        'f_16', 'f_17', 'f_18', 'f_19', 'f_20', 'f_21', 'f_22', 'f_23', 'f_24',
+        'f_25', 'f_26', 'f_27', 'f_28', 'f_29', 'f_30', 'f_31', 'f_32', 'f_33',
+        'f_34', 'f_35', 'f_36', 'f_37', 'f_38', 'f_39', 'f_40', 'f_41', 'f_42',
+        'f_43', 'f_44', 'f_45', 'f_46', 'f_47', 'f_48', 'f_49', 'f_50', 'f_51',
+        'f_52', 'f_53', 'f_54', 'f_55', 'f_56', 'f_57', 'f_58', 'f_59', 'f_60',
+        'f_61', 'f_62', 'f_63', 'f_64', 'richness']] = df['text'].parallel_apply(
+        lambda x: extract_style(x))  # noqa
 
 
-def create(input_file: str | Path,
-           output_dir: str | Path,
+def create(input_file: Path,
+           output_dir: Path,
            num_of_authors: int,
            add_out_of_class: bool = False,
            add_text_features: bool = False,
            train_test_split: float = 0.75):
-    input_file = Path(input_file) if isinstance(input_file, str) else input_file
-    output_dir = Path(output_dir) if isinstance(output_dir, str) else output_dir
+    if num_of_authors < 1:
+        raise ValueError('Number of authors must be at least 1')
+    if train_test_split <= 0 or train_test_split >= 1:
+        raise ValueError('Train-test split must be between 0 and 1')
+
+    LOGGER.info(f'Creating dataset with {num_of_authors} authors from {input_file}')
+    input_file = input_file.resolve()
+    output_dir = output_dir.resolve()
 
     df = pd.read_csv(input_file)
     df = df[['author', 'text']]
@@ -80,6 +91,7 @@ def create(input_file: str | Path,
     test['label'] = test['label'].replace(replace_dict)
 
     if add_out_of_class:
+        LOGGER.info('Adding out-of-class texts')
         out_of_class_df = pd.DataFrame(columns=['label', 'text'])
         last_author_text_count = len(df[df['label'] == selected_authors[-1]])
         # math.ceil is used to ensure that the number of texts per author is at least 1
@@ -102,6 +114,7 @@ def create(input_file: str | Path,
     test = test.sample(frac=1).reset_index(drop=True)
 
     if add_text_features:
+        LOGGER.info('Adding text features')
         insert_features(train)
         insert_features(test)
 
@@ -110,17 +123,4 @@ def create(input_file: str | Path,
     ooc_suffix = 'withOOC' if add_out_of_class else 'withoutOOC'
     train.to_csv(output_dir / f'train_top{num_of_authors}_{ooc_suffix}.csv', index=False)
     test.to_csv(output_dir / f'test_top{num_of_authors}_{ooc_suffix}.csv', index=False)
-
-
-def main():
-    for ooc in [False, True]:
-        for author_count in [5, 10, 25, 50]:
-            create('datasets/csfd_new.csv',
-                   f'datasets/csfd/top{author_count}',
-                   author_count,
-                   add_out_of_class=ooc,
-                   add_text_features=True)
-
-
-if __name__ == '__main__':
-    main()
+    LOGGER.info(f'Dataset created and saved to {output_dir}')
