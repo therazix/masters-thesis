@@ -8,8 +8,10 @@ from typing import Optional
 import click
 
 import prepare_dataset
-import scraper.csfd
-import scraper.reddit
+import scrapers.csfd
+import scrapers.reddit
+import models.xlm_roberta
+import utils
 
 TEMP_DIR = Path(tempfile.gettempdir()) / 'DP_541699'
 
@@ -29,7 +31,7 @@ def to_path(ctx, param, value):
               type=str,
               help='Custom user agent.')
 def scrape_reddit(output_dir: Optional[Path], user_agent: Optional[str]):
-    reddit_scraper = scraper.reddit.RedditScraper(output_dir, user_agent)
+    reddit_scraper = scrapers.reddit.RedditScraper(output_dir, user_agent)
     reddit_scraper.scrape()
 
 
@@ -48,7 +50,7 @@ def scrape_reddit(output_dir: Optional[Path], user_agent: Optional[str]):
               is_flag=True,
               help='Continue scraping from the last saved state.')
 def scrape_csfd(output_dir: Optional[Path], user_agent: Optional[str], resume: bool):
-    csfd_scraper = scraper.csfd.CSFDScraper(TEMP_DIR / 'csfd', output_dir, user_agent)
+    csfd_scraper = scrapers.csfd.CSFDScraper(TEMP_DIR / 'csfd', output_dir, user_agent)
     if resume:
         csfd_scraper.load_state()
     csfd_scraper.scrape()
@@ -61,6 +63,42 @@ def scrape():
 
 scrape.add_command(scrape_reddit)
 scrape.add_command(scrape_csfd)
+
+
+@click.command(name='xlm-roberta')
+@click.option('--training-set',
+              required=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              help='Training set for the model.')
+@click.option('--testing-set',
+              required=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              help='Testing set for the model.')
+@click.option('--checkpoint-dir',
+              required=True,
+              type=click.Path(file_okay=False, dir_okay=True, readable=True),
+              callback=to_path,
+              help='Directory for model checkpoints.')
+@click.option('--model-dir',
+              required=True,
+              type=click.Path(file_okay=False, dir_okay=True, readable=True),
+              callback=to_path,
+              help='Directory for saved model.')
+def train_xlm_roberta(training_set: Path, testing_set: Path, checkpoint_dir: Path, model_dir: Path):
+    train_df = utils.load_csv(training_set)
+    test_df = utils.load_csv(testing_set)
+    xlm_roberta = models.xlm_roberta.XLMRoberta(train_df, test_df, checkpoint_dir, model_dir)
+    xlm_roberta.train(epochs=5)
+
+
+@click.group()
+def train():
+    pass
+
+
+train.add_command(train_xlm_roberta)
 
 
 @click.command(name='create-dataset')
@@ -120,6 +158,7 @@ def cli(verbose: int):
 
 
 cli.add_command(scrape)
+cli.add_command(train)
 cli.add_command(create_dataset)
 
 if __name__ == "__main__":

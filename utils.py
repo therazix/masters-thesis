@@ -3,6 +3,7 @@ import strip_markdown
 import logging
 from typing import Callable, Optional
 from pathlib import Path
+import pandas as pd
 import time
 import json
 
@@ -53,4 +54,8 @@ def load_json(file_path: Path):
 def save_json(data, file_path: Path):
     with file_path.open('w') as file:
         json.dump(data, file, indent=2)
+
+
+def load_csv(file_path: Path):
+    return pd.read_csv(file_path)
 

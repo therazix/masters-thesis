@@ -17,13 +17,14 @@ LOGGER = logging.getLogger(__name__)
 def extract_style(text: str):
     words = text.split()
 
-    len_text = len(text)
-    len_words = len(words)
-    avg_len = np.mean([len(w) for w in words])
-    num_short_w = len([w for w in words if len(w) < 3])
-    per_digit = sum(c.isdigit() for c in text) / len_text
-    per_cap = sum(1 for c in text if c.isupper()) / len_text
-    richness = len(list(set(words))) / len_words
+    len_text = len(text)  # Number of characters in the whole text
+    len_words = len(words)  # Number of words
+    avg_len = np.mean([len(w) for w in words])  # Average word length
+    num_short_w = len([w for w in words if len(w) < 3])  # Number of words with less than 3 chars
+    per_digit = sum(c.isdigit() for c in text) / len_text  # Percentage of digits
+    per_cap = sum(1 for c in text if c.isupper()) / len_text  # Percentage of capital letters
+    richness = len(list(set(words))) / len_words  # Ratio of unique words to all words
+    # Frequencies of each character relative to the whole text
     frequencies = {char: sum(1 for c in text if c.lower() == char) / len_text for char in CHARS}
 
     return pd.Series(
