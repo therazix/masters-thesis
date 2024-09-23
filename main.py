@@ -89,6 +89,8 @@ scrape.add_command(scrape_csfd)
 def train_xlm_roberta(training_set: Path, testing_set: Path, checkpoint_dir: Path, model_dir: Path):
     train_df = utils.load_csv(training_set)
     test_df = utils.load_csv(testing_set)
+    train_df = train_df[['label', 'text']]
+    test_df = test_df[['label', 'text']]
     xlm_roberta = models.xlm_roberta.XLMRoberta(train_df, test_df, checkpoint_dir, model_dir)
     xlm_roberta.train(epochs=5)
 
