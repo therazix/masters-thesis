@@ -12,7 +12,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def retry_on_exception(exception: BaseException, max_retries: int = 5, sleep_time: int = 5):  # noqa
-    def decorator(func: Callable[..., ...]):
+    def decorator(func):
         def _retry(*args, **kwargs):
             last_exc: Optional[Exception] = None
             for i in range(max_retries):
