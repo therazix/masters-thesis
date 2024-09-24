@@ -86,13 +86,19 @@ scrape.add_command(scrape_csfd)
               type=click.Path(file_okay=False, dir_okay=True, readable=True),
               callback=to_path,
               help='Directory for saved model.')
-def train_xlm_roberta(training_set: Path, testing_set: Path, checkpoint_dir: Path, model_dir: Path):
-    train_df = utils.load_csv(training_set)
-    test_df = utils.load_csv(testing_set)
-    train_df = train_df[['label', 'text']]
-    test_df = test_df[['label', 'text']]
-    xlm_roberta = models.xlm_roberta.XLMRoberta(train_df, test_df, checkpoint_dir, model_dir)
-    xlm_roberta.train(epochs=5)
+@click.option('-e', '--epochs',
+              required=True,
+              type=int,
+              help='Number of epochs for training.')
+@click.option('--resume',
+              required=False,
+              is_flag=True,
+              help='Continue training from the last checkpoint.')
+def train_xlm_roberta(training_set: Path, testing_set: Path, checkpoint_dir: Path,
+                      model_dir: Path, epochs: int, resume: bool):
+    xlm_roberta = models.xlm_roberta.XLMRoberta(
+        training_set, testing_set, checkpoint_dir, model_dir)
+    xlm_roberta.train(epochs=epochs, resume_training=resume)
 
 
 @click.group()

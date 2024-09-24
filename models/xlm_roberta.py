@@ -3,12 +3,18 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, DataCollatorWithPadding, Trainer, TrainingArguments
 from metrics import compute_metrics
+from datasets import Dataset, load_dataset
+
+
+def process_dataset(dataset_path: Path) -> pd.DataFrame:
+    df = pd.read_csv(dataset_path)
+    return df[['label', 'text']]
 
 
 class XLMRoberta:
     def __init__(self,
-                 training_set: pd.DataFrame,
-                 testing_set: pd.DataFrame,
+                 training_set: Path,
+                 testing_set: Path,
                  checkpoint_path: Path,
                  model_path: Optional[Path] = None):
         self.checkpoint_path = checkpoint_path.resolve()
@@ -16,22 +22,17 @@ class XLMRoberta:
         self.model_base = 'xlm-roberta-base'  # Huggingface model name
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_base)
         self.data_collator = DataCollatorWithPadding(tokenizer=self.tokenizer)
-        self.train_df = self._tokenize_data(training_set)
-        self.test_df = self._tokenize_data(testing_set)
+        self.train_df = process_dataset(training_set)
+        self.test_df = process_dataset(testing_set)
+        self.train_dataset = self._tokenize_data(Dataset.from_pandas(self.train_df, split='train'))
+        self.test_dataset = self._tokenize_data(Dataset.from_pandas(self.test_df, split='test'))
         self._init_directories()
         self.trainer = None
 
-    @classmethod
-    def from_checkpoint(cls,
-                        checkpoint_path: Path,
-                        training_set: pd.DataFrame,
-                        validation_set: pd.DataFrame):
-        pass
-
-    def _tokenize_data(self, dataframe: pd.DataFrame):
+    def _tokenize_data(self, dataset: Dataset):
         def tokenize_function(examples):
             return self.tokenizer(examples["text"], truncation=True)
-        return dataframe.map(tokenize_function, batched=True)
+        return dataset.map(tokenize_function, batched=True)
 
     def _get_dataset_stats(self) -> Tuple[int, Dict[int, str], Dict[str, int]]:
         author_names = self.test_df['label'].unique()
@@ -73,8 +74,8 @@ class XLMRoberta:
         self.trainer = Trainer(
             model=model,
             args=training_args,
-            train_dataset=self.train_df,
-            eval_dataset=self.test_df,
+            train_dataset=self.train_dataset,
+            eval_dataset=self.test_dataset,
             tokenizer=self.tokenizer,
             data_collator=self.data_collator,
             compute_metrics=compute_metrics,
@@ -87,7 +88,7 @@ class XLMRoberta:
         self.tokenizer.save_pretrained(str(self.model_path / 'tokenizer'))
         self.trainer.save_model(str(self.model_path / 'model'))
 
-    def predict(self, input_data: pd.DataFrame, is_input_tokenized: bool = False):
-        if not is_input_tokenized:
+    def predict(self, input_data: Dataset, tokenize: bool = True):
+        if tokenize:
             input_data = self._tokenize_data(input_data)
         return self.trainer.predict(input_data)
