@@ -1,25 +1,29 @@
-import os
-from dotenv import load_dotenv
-import praw
 import csv
-import utils
-import time
 import logging
-from praw import models
-from typing import Optional
+import os
+import time
 from pathlib import Path
+from typing import Optional
+
+import praw
+from dotenv import load_dotenv
+from praw import models
+
+from utils import get_child_logger, remove_markdown
 from . import Scraper
 
 RATELIMIT_SECONDS = 300
 INVALID_AUTHORS = ['automoderator', 'moderator', 'deleted', '[deleted]', 'removed', '[removed]']
-LOGGER = logging.getLogger(__name__)
 
 
 class RedditScraper(Scraper):
-    def __init__(self, output_dir: Optional[Path] = None, user_agent: Optional[str] = None):
+    def __init__(self,
+                 output_dir: Optional[Path] = None,
+                 user_agent: Optional[str] = None,
+                 logger: Optional[logging.Logger] = None):
         output_dir = output_dir or Path('scraped_data/reddit')
         output_dir = output_dir.resolve()
-        super().__init__(output_dir, user_agent)
+        super().__init__(output_dir, user_agent, get_child_logger(__name__, logger))
         self._init_reddit()
 
     def _init_reddit(self):
@@ -63,7 +67,7 @@ class RedditScraper(Scraper):
 
     @classmethod
     def _parse_reddit_post(cls, text: str) -> Optional[str]:
-        text = utils.remove_markdown(text)
+        text = remove_markdown(text)
         return cls._parse_author_text(text)
 
     @classmethod
@@ -101,6 +105,8 @@ class RedditScraper(Scraper):
         subreddit = self.reddit.subreddit("czech")
 
         filepath = self.output_dir / f'reddit_{time.strftime("%y%m%d_%H%M%S")}.csv'
+        self.logger.info(f"Scraping started. Output file: '{filepath}'")
+        start_time = time.time()
         with filepath.open('a+', newline='', encoding='utf-8') as file:
             writer = csv.writer(file, quoting=csv.QUOTE_MINIMAL)
             writer.writerow(('author', 'post_id', 'text'))  # Header
@@ -115,4 +121,6 @@ class RedditScraper(Scraper):
                         if text:
                             writer.writerow((comment.author.name, comment.id, text))
                         self._parse_replies(writer, comment)
-                LOGGER.info(f"Finished scraping of submission '{submission.id}'")
+                self.logger.debug(f"Finished scraping of submission '{submission.id}'")
+        time_elapsed = time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))
+        self.logger.info(f"Scraping finished. Time elapsed: {time_elapsed}")

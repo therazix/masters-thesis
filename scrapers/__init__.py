@@ -1,17 +1,21 @@
 import logging
-import langid
-from typing import Optional
 from pathlib import Path
+from typing import Optional
+
+import langid
+
+import utils
 
 DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2311.135 Safari/537.36 Edge/12.246'  # noqa
 MIN_AUTHOR_TEXT_LENGTH = 20
-LOGGER = logging.getLogger(__name__)
 
 
 class Scraper:
-    def __init__(self, output_dir: Path, user_agent: Optional[str]):  # noqa
+    def __init__(self, output_dir: Path, user_agent: Optional[str] = None,
+                 logger: Optional[logging.Logger] = None):
         self.output_dir = output_dir
         self.user_agent = user_agent or DEFAULT_USER_AGENT
+        self.logger = utils.get_child_logger(__name__, logger)
 
     def _init_directories(self):
         self.output_dir.mkdir(parents=True, exist_ok=True)

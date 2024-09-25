@@ -1,7 +1,7 @@
 import re
 import strip_markdown
 import logging
-from typing import Callable, Optional
+from typing import Optional
 from pathlib import Path
 import pandas as pd
 import time
@@ -58,4 +58,11 @@ def save_json(data, file_path: Path):
 
 def load_csv(file_path: Path):
     return pd.read_csv(file_path)
+
+
+def get_child_logger(name: str, parent_logger: Optional[logging.Logger] = None) -> logging.Logger:
+    if parent_logger:
+        return parent_logger.getChild(name)
+    else:
+        return logging.getLogger(name)
 

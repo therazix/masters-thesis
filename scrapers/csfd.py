@@ -8,22 +8,21 @@ from typing import Dict, Optional
 import lxml.html
 import requests
 
-from utils import load_json, save_json
-from utils import retry_on_exception
+from utils import get_child_logger, load_json, retry_on_exception, save_json
 from . import Scraper
 
 MAX_REVIEWS_PER_USER = 6000
-LOGGER = logging.getLogger(__name__)
 
 
 class CSFDScraper(Scraper):
     def __init__(self,
                  run_dir: Path,
-                 output_dir: Optional[Path],
-                 user_agent: Optional[str]):
+                 output_dir: Optional[Path] = None,
+                 user_agent: Optional[str] = None,
+                 logger: Optional[logging.Logger] = None):
         output_dir = output_dir or Path('scraped_data/csfd')
         output_dir = output_dir.resolve()
-        super().__init__(output_dir, user_agent)
+        super().__init__(output_dir, user_agent, get_child_logger(__name__, logger))
 
         self.run_dir = run_dir.resolve()
         self.users: Dict[str, bool] = {}
@@ -52,7 +51,7 @@ class CSFDScraper(Scraper):
         reviews = 0
 
         while reviews < MAX_REVIEWS_PER_USER:
-            LOGGER.debug(f"Scraping page #{page} of user '{username}'")
+            self.logger.debug(f"Scraping page #{page} of user '{username}'")
             html = self._get_html(f'https://www.csfd.cz/uzivatel/{username}/recenze/?page={page}')
 
             for review in html.xpath(
@@ -68,27 +67,28 @@ class CSFDScraper(Scraper):
                     reviews += 1
 
             if not html.xpath('//div[@class="user-main-content"]//a[@class="page-next"]'):
-                LOGGER.debug(f"Scraped all reviews of user '{username}'")
+                self.logger.debug(f"Scraped all reviews of user '{username}'")
                 return
 
             page += 1
             time.sleep(self.sleep_time)
-        LOGGER.debug(f"Scraped {reviews} reviews of user '{username}' (limit reached)")
+        self.logger.debug(f"Scraped {reviews} reviews of user '{username}' (limit reached)")
 
     def scrape(self):
-        LOGGER.info('Started scraping CSFD')
         self._init_directories()
         self.users = self.users or self._scrape_users()
-        self.output_file = self.output_file or self.output_dir / f'csfd_{time.strftime("%y%m%d_%H%M%S")}.csv'
+        self.output_file = self.output_file or self.output_dir / f'csfd_{time.strftime("%y%m%d_%H%M%S")}.csv'  # noqa
         self.save_state()
 
         users_to_scrape = [user for user, scraped in self.users.items() if not scraped]
         user_count = len(users_to_scrape)
 
         if user_count == 0:
-            LOGGER.info('No users to scrape')
+            self.logger.info('No users to scrape')
             return
 
+        self.logger.info(f"Scraping started. Output file: '{self.output_file}'")
+        start_time = time.time()
         with self.output_file.open('a+', newline='', encoding='utf-8') as file:
             writer = csv.writer(file, quoting=csv.QUOTE_MINIMAL)
             writer.writerow(('author', 'movie_id', 'text'))  # Header
@@ -96,8 +96,9 @@ class CSFDScraper(Scraper):
                 self._scrape_reviews(user, writer)
                 self.users[user] = True
                 self.save_state()
-                LOGGER.info(f"Finished scraping of user '{user}' ({i + 1}/{user_count})")
-        LOGGER.info('Scraping finished')
+                self.logger.info(f"Finished scraping of user '{user}' ({i + 1}/{user_count})")
+        time_elapsed = time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))
+        self.logger.info(f"Scraping finished. Time elapsed: {time_elapsed}")
 
     def load_state(self):
         state = load_json(self.run_dir / 'last_state.json')
@@ -106,8 +107,8 @@ class CSFDScraper(Scraper):
         self.user_agent = state['user_agent']
         self.users = state['users']
         self._update_session_headers()
-        LOGGER.info("Resuming scraping from the last saved state. "
-                    f"Data will be appended to '{self.output_file}'")
+        self.logger.info("Resuming scraping from the last saved state. "
+                         f"Data will be appended to '{self.output_file}'")
 
     def save_state(self):
         self.run_dir.mkdir(parents=True, exist_ok=True)
@@ -119,20 +120,19 @@ class CSFDScraper(Scraper):
         }
         save_json(state, self.run_dir / 'last_state.json')
 
-    @classmethod
-    def _parse_username_from_url(cls, url: str) -> str:
-        return url.split('uzivatel/', maxsplit=1)[-1].split('/', maxsplit=1)[0]
-
-    @classmethod
-    def _parse_movie_id_from_url(cls, url: str) -> str:
+    def _parse_movie_id_from_url(self, url: str) -> str:
         pattern = r"film/(\d+)(?:-[^/]+)?(?:/(\d+))?"
         matches = re.search(pattern, url)
         if matches:
             movie_id = matches.group(1)
             episode_id = matches.group(2)
             return f"{movie_id}_{episode_id}" if episode_id else movie_id
-        LOGGER.warning(f"Failed to parse movie ID from URL '{url}'")
+        self.logger.warning(f"Failed to parse movie ID from URL '{url}'")
         return 'UNKNOWN'
+
+    @classmethod
+    def _parse_username_from_url(cls, url: str) -> str:
+        return url.split('uzivatel/', maxsplit=1)[-1].split('/', maxsplit=1)[0]
 
     @classmethod
     def _parse_review_count(cls, text: str) -> int:

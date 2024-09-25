@@ -7,11 +7,10 @@ from typing import Optional
 
 import click
 
-import prepare_dataset
+import dataset_parser
 import scrapers.csfd
 import scrapers.reddit
 import models.xlm_roberta
-import utils
 
 TEMP_DIR = Path(tempfile.gettempdir()) / 'DP_541699'
 
@@ -30,8 +29,10 @@ def to_path(ctx, param, value):
               required=False,
               type=str,
               help='Custom user agent.')
-def scrape_reddit(output_dir: Optional[Path], user_agent: Optional[str]):
-    reddit_scraper = scrapers.reddit.RedditScraper(output_dir, user_agent)
+@click.pass_context
+def scrape_reddit(ctx: click.Context, output_dir: Optional[Path], user_agent: Optional[str]):
+    logger = ctx.obj['logger']
+    reddit_scraper = scrapers.reddit.RedditScraper(output_dir, user_agent, logger)
     reddit_scraper.scrape()
 
 
@@ -49,8 +50,11 @@ def scrape_reddit(output_dir: Optional[Path], user_agent: Optional[str]):
               required=False,
               is_flag=True,
               help='Continue scraping from the last saved state.')
-def scrape_csfd(output_dir: Optional[Path], user_agent: Optional[str], resume: bool):
-    csfd_scraper = scrapers.csfd.CSFDScraper(TEMP_DIR / 'csfd', output_dir, user_agent)
+@click.pass_context
+def scrape_csfd(ctx: click.Context, output_dir: Optional[Path],
+                user_agent: Optional[str], resume: bool):
+    logger = ctx.obj['logger']
+    csfd_scraper = scrapers.csfd.CSFDScraper(TEMP_DIR / 'csfd', output_dir, user_agent, logger)
     if resume:
         csfd_scraper.load_state()
     csfd_scraper.scrape()
@@ -94,10 +98,12 @@ scrape.add_command(scrape_csfd)
               required=False,
               is_flag=True,
               help='Continue training from the last checkpoint.')
-def train_xlm_roberta(training_set: Path, testing_set: Path, checkpoint_dir: Path,
-                      model_dir: Path, epochs: int, resume: bool):
+@click.pass_context
+def train_xlm_roberta(ctx: click.Context, training_set: Path, testing_set: Path,
+                      checkpoint_dir: Path, model_dir: Path, epochs: int, resume: bool):
+    logger = ctx.obj['logger']
     xlm_roberta = models.xlm_roberta.XLMRoberta(
-        training_set, testing_set, checkpoint_dir, model_dir)
+        training_set, testing_set, checkpoint_dir, model_dir, logger)
     xlm_roberta.train(epochs=epochs, resume_training=resume)
 
 
@@ -137,32 +143,39 @@ train.add_command(train_xlm_roberta)
               required=False,
               is_flag=True,
               help='Add text features to the dataset.')
-def create_dataset(input_file: Path, output_dir: Optional[Path], num_of_authors: int,
-                   train_test_split: float, add_out_of_class: bool, add_text_features: bool):
+@click.pass_context
+def create_dataset(ctx: click.Context, input_file: Path, output_dir: Optional[Path],
+                   num_of_authors: int, train_test_split: float, add_out_of_class: bool,
+                   add_text_features: bool):
+    logger = ctx.obj['logger']
     output_dir = output_dir or Path('datasets')
-    prepare_dataset.create(input_file, output_dir, num_of_authors, add_out_of_class,
-                           add_text_features, train_test_split)
+    parser = dataset_parser.DatasetParser(input_file, output_dir, logger)
+    parser.create(num_of_authors, add_out_of_class, add_text_features, train_test_split)
 
 
 @click.group()
 @click.option('-v', '--verbose', count=True)
-def cli(verbose: int):
+@click.pass_context
+def cli(ctx: click.Context, verbose: int):
     """TODO: Add a docstring."""
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
     log_file = (TEMP_DIR / f'{time.strftime("%y%m%d_%H%M%S")}.log').resolve()
 
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
+    logger = logging.getLogger('main')
+    logger.setLevel(logging.INFO)
     formater = logging.Formatter('%(asctime)s [%(name)s] [%(levelname)s]: %(message)s')
 
     file_handler = logging.FileHandler(str(log_file))
     file_handler.setFormatter(formater)
-    root_logger.addHandler(file_handler)  # Log to file
+    logger.addHandler(file_handler)  # Log to file
 
     if verbose > 0:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formater)
-        root_logger.addHandler(console_handler)  # Log also to stdout
+        logger.addHandler(console_handler)  # Log also to stdout
+
+    ctx.ensure_object(dict)
+    ctx.obj['logger'] = logger
 
 
 cli.add_command(scrape)

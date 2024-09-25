@@ -1,9 +1,15 @@
-import pandas as pd
+import logging
+import time
 from pathlib import Path
 from typing import Optional, Tuple, Dict
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, DataCollatorWithPadding, Trainer, TrainingArguments
+
+import pandas as pd
+from datasets import Dataset
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, \
+    DataCollatorWithPadding, Trainer, TrainingArguments
+
+import utils
 from metrics import compute_metrics
-from datasets import Dataset, load_dataset
 
 
 def process_dataset(dataset_path: Path) -> pd.DataFrame:
@@ -16,9 +22,11 @@ class XLMRoberta:
                  training_set: Path,
                  testing_set: Path,
                  checkpoint_path: Path,
-                 model_path: Optional[Path] = None):
+                 model_path: Optional[Path] = None,
+                 logger: Optional[logging.Logger] = None):
         self.checkpoint_path = checkpoint_path.resolve()
         self.model_path = (model_path or checkpoint_path).resolve()
+        self.logger = utils.get_child_logger(__name__, logger)
         self.model_base = 'xlm-roberta-base'  # Huggingface model name
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_base)
         self.data_collator = DataCollatorWithPadding(tokenizer=self.tokenizer)
@@ -32,9 +40,10 @@ class XLMRoberta:
     def _tokenize_data(self, dataset: Dataset):
         def tokenize_function(examples):
             return self.tokenizer(examples["text"], truncation=True)
+
         return dataset.map(tokenize_function, batched=True)
 
-    def _get_dataset_stats(self) -> Tuple[int, Dict[int, str], Dict[str, int]]:
+    def _get_dataset_info(self) -> Tuple[int, Dict[int, str], Dict[str, int]]:
         author_names = self.test_df['label'].unique()
         num_of_authors = len(author_names)
         id2label = {int(i): str(author_names[i]) for i in range(num_of_authors)}
@@ -57,13 +66,14 @@ class XLMRoberta:
             save_strategy='epoch',
             save_total_limit=1,
             load_best_model_at_end=True,
+            metric_for_best_model='eval_loss',
             push_to_hub=False,
-            report_to=['tensorboard'],
+            report_to='none',
         )
 
     def train(self, epochs: int, resume_training: bool = False):
         training_args = self._get_training_args(epochs)
-        num_of_authors, id2label, label2id = self._get_dataset_stats()
+        num_of_authors, id2label, label2id = self._get_dataset_info()
 
         model = AutoModelForSequenceClassification.from_pretrained(
             str(self.checkpoint_path) if resume_training else self.model_base,
@@ -82,11 +92,17 @@ class XLMRoberta:
         )
 
         # Train model
+        start_time = time.time()
         self.trainer.train()
+        time_elapsed = time.time() - start_time
+        self.logger.info(
+            f'Training completed in {time.strftime("%H:%M:%S", time.gmtime(time_elapsed))}')
+        self.logger.info(f'Metrics: {self.trainer.evaluate()}')
 
         # Save model
         self.tokenizer.save_pretrained(str(self.model_path / 'tokenizer'))
         self.trainer.save_model(str(self.model_path / 'model'))
+        self.logger.info(f"Model saved to '{self.model_path}'")
 
     def predict(self, input_data: Dataset, tokenize: bool = True):
         if tokenize:
