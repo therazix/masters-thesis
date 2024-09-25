@@ -44,7 +44,7 @@ class XLMRoberta:
         return dataset.map(tokenize_function, batched=True)
 
     def _get_dataset_info(self) -> Tuple[int, Dict[int, str], Dict[str, int]]:
-        author_names = self.test_df['label'].unique()
+        author_names = sorted(self.test_df['label'].unique())
         num_of_authors = len(author_names)
         id2label = {int(i): str(author_names[i]) for i in range(num_of_authors)}
         label2id = {str(author_names[i]): int(i) for i in range(num_of_authors)}
