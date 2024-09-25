@@ -8,7 +8,7 @@ from datasets import Dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, \
     DataCollatorWithPadding, Trainer, TrainingArguments
 
-from utils import get_child_logger, get_latest_checkpoint
+from utils import get_child_logger
 from metrics import compute_metrics
 
 
@@ -21,14 +21,16 @@ class XLMRoberta:
     def __init__(self,
                  training_set: Path,
                  testing_set: Path,
-                 checkpoint_path: Path,
+                 checkpoint_dir: Path,
                  model_path: Optional[Path] = None,
+                 checkpoint: Optional[Path] = None,
                  logger: Optional[logging.Logger] = None):
-        self.checkpoint_path = checkpoint_path.resolve()
-        self.model_path = (model_path or checkpoint_path).resolve()
+        self.checkpoint_dir = checkpoint_dir.resolve()
+        self.model_path = (model_path or checkpoint_dir).resolve()
         self.logger = get_child_logger(__name__, logger)
         self.model_base = 'xlm-roberta-base'  # Huggingface model name
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_base)
+        self.model_name_or_path = str(checkpoint.resolve()) if checkpoint else self.model_base
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name_or_path)
         self.data_collator = DataCollatorWithPadding(tokenizer=self.tokenizer)
         self.train_df = process_dataset(training_set)
         self.test_df = process_dataset(testing_set)
@@ -51,12 +53,12 @@ class XLMRoberta:
         return num_of_authors, id2label, label2id
 
     def _init_directories(self):
-        self.checkpoint_path.mkdir(parents=True, exist_ok=True)
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.model_path.mkdir(parents=True, exist_ok=True)
 
     def _get_training_args(self, epochs: int):
         return TrainingArguments(
-            output_dir=str(self.checkpoint_path),
+            output_dir=str(self.checkpoint_dir),
             overwrite_output_dir=True,
             learning_rate=2e-5,
             per_device_train_batch_size=12,
@@ -72,12 +74,12 @@ class XLMRoberta:
             report_to='none',
         )
 
-    def train(self, epochs: int, resume_training: bool = False):
+    def train(self, epochs: int):
         training_args = self._get_training_args(epochs)
         num_of_authors, id2label, label2id = self._get_dataset_info()
 
         model = AutoModelForSequenceClassification.from_pretrained(
-            str(get_latest_checkpoint(self.checkpoint_path)) if resume_training else self.model_base,  # noqa
+            self.model_name_or_path,
             num_labels=num_of_authors,
             id2label=id2label,
             label2id=label2id

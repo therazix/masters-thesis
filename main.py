@@ -94,17 +94,19 @@ scrape.add_command(scrape_csfd)
               required=True,
               type=int,
               help='Number of epochs for training.')
-@click.option('--resume',
+@click.option('--checkpoint',
               required=False,
-              is_flag=True,
-              help='Continue training from the last checkpoint.')
+              type=click.Path(file_okay=False, dir_okay=True, readable=True),
+              callback=to_path,
+              help='Checkpoint to resume training. Must be a directory.')
 @click.pass_context
 def train_xlm_roberta(ctx: click.Context, training_set: Path, testing_set: Path,
-                      checkpoint_dir: Path, model_dir: Path, epochs: int, resume: bool):
+                      checkpoint_dir: Path, model_dir: Path, epochs: int,
+                      checkpoint: Optional[Path]):
     logger = ctx.obj['logger']
     xlm_roberta = models.xlm_roberta.XLMRoberta(
-        training_set, testing_set, checkpoint_dir, model_dir, logger)
-    xlm_roberta.train(epochs=epochs, resume_training=resume)
+        training_set, testing_set, checkpoint_dir, model_dir, checkpoint, logger)
+    xlm_roberta.train(epochs=epochs)
 
 
 @click.group()
