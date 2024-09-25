@@ -8,7 +8,7 @@ from datasets import Dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, \
     DataCollatorWithPadding, Trainer, TrainingArguments
 
-import utils
+from utils import get_child_logger, get_latest_checkpoint
 from metrics import compute_metrics
 
 
@@ -26,7 +26,7 @@ class XLMRoberta:
                  logger: Optional[logging.Logger] = None):
         self.checkpoint_path = checkpoint_path.resolve()
         self.model_path = (model_path or checkpoint_path).resolve()
-        self.logger = utils.get_child_logger(__name__, logger)
+        self.logger = get_child_logger(__name__, logger)
         self.model_base = 'xlm-roberta-base'  # Huggingface model name
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_base)
         self.data_collator = DataCollatorWithPadding(tokenizer=self.tokenizer)
@@ -57,14 +57,15 @@ class XLMRoberta:
     def _get_training_args(self, epochs: int):
         return TrainingArguments(
             output_dir=str(self.checkpoint_path),
+            overwrite_output_dir=True,
             learning_rate=2e-5,
             per_device_train_batch_size=12,
             per_device_eval_batch_size=12,
             num_train_epochs=max(epochs, 1),
             weight_decay=0.01,
-            evaluation_strategy='epoch',
+            eval_strategy='epoch',
             save_strategy='epoch',
-            save_total_limit=1,
+            save_total_limit=2,
             load_best_model_at_end=True,
             metric_for_best_model='eval_loss',
             push_to_hub=False,
@@ -76,7 +77,7 @@ class XLMRoberta:
         num_of_authors, id2label, label2id = self._get_dataset_info()
 
         model = AutoModelForSequenceClassification.from_pretrained(
-            str(self.checkpoint_path) if resume_training else self.model_base,
+            str(get_latest_checkpoint(self.checkpoint_path)) if resume_training else self.model_base,  # noqa
             num_labels=num_of_authors,
             id2label=id2label,
             label2id=label2id
@@ -94,9 +95,9 @@ class XLMRoberta:
         # Train model
         start_time = time.time()
         self.trainer.train()
-        time_elapsed = time.time() - start_time
-        self.logger.info(
-            f'Training completed in {time.strftime("%H:%M:%S", time.gmtime(time_elapsed))}')
+        time_elapsed = time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))
+        self.logger.info(f'Training completed in {time_elapsed}')
+
         self.logger.info(f'Metrics: {self.trainer.evaluate()}')
 
         # Save model

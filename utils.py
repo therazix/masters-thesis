@@ -66,3 +66,12 @@ def get_child_logger(name: str, parent_logger: Optional[logging.Logger] = None) 
     else:
         return logging.getLogger(name)
 
+
+def get_latest_checkpoint(checkpoint_dir: Path) -> Optional[Path]:
+    checkpoints = [f for f in checkpoint_dir.iterdir() if f.is_dir() and f.name.lower().startswith('checkpoint-')]  # noqa
+    try:
+        sorted_checkpoints = sorted(checkpoints, key=lambda x: int(x.name.split('-')[-1]))
+        return sorted_checkpoints[-1]
+    except (IndexError, ValueError):
+        return None
+
