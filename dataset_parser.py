@@ -1,7 +1,7 @@
 import logging
 import math
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -99,33 +99,34 @@ class DatasetParser:
                num_of_authors: int,
                add_out_of_class: bool = False,
                add_text_features: bool = False,
-               train_test_split: float = 0.75):
+               split: Tuple[float, float, float] = (0.7, 0.15, 0.15)):
         if num_of_authors < 1:
             raise ValueError('Number of authors must be at least 1')
-        if train_test_split <= 0 or train_test_split >= 1:
-            raise ValueError('Train-test split must be between 0 and 1')
+        if sum(split) != 1:
+            raise ValueError('Sum of split values must be 1')
 
         selected_authors = self.authors[:num_of_authors]
         non_selected_authors = self.authors[num_of_authors:]
 
         # Initialize the train and test dataframes
         train = pd.DataFrame(columns=['label', 'text'])
+        val = pd.DataFrame(columns=['label', 'text'])
         test = pd.DataFrame(columns=['label', 'text'])
 
         for author in selected_authors:
             author_df = self.df[self.df['label'] == author]  # Get all texts of the author
             author_df = author_df.sample(frac=1).reset_index(drop=True)  # Shuffle author's texts
-            split_index = int(train_test_split * len(author_df))
-            train_df = author_df.iloc[:split_index]
-            test_df = author_df.iloc[split_index:]
+            # Get the indexes for splitting the author's texts into train, validation and test sets
+            split_indexes = [int(sum(split[:i+1]) * len(author_df)) for i in range(len(split) - 1)]
+
+            train_df = author_df.iloc[:split_indexes[0]]
+            val_df = author_df.iloc[split_indexes[0]:split_indexes[1]]
+            test_df = author_df.iloc[split_indexes[1]:]
+
             # Add author's texts to the train and test dataframes
             train = pd.concat([train, train_df], ignore_index=True)
+            val = pd.concat([val, val_df], ignore_index=True)
             test = pd.concat([test, test_df], ignore_index=True)
-
-        # Rename all authors
-        replace_dict = {author: str(i) for i, author in enumerate(selected_authors)}
-        train['label'] = train['label'].replace(replace_dict)
-        test['label'] = test['label'].replace(replace_dict)
 
         if add_out_of_class:
             self.logger.info('Adding out-of-class texts')
@@ -141,21 +142,35 @@ class DatasetParser:
 
             out_of_class_df['label'] = str(len(selected_authors))
             out_of_class_df = out_of_class_df.sample(frac=1).reset_index(drop=True)
-            split_index = int(train_test_split * len(out_of_class_df))
-            train_out_of_class = out_of_class_df.iloc[:split_index]
-            test_out_of_class = out_of_class_df.iloc[split_index:]
+            split_indexes = [int(sum(split[:i + 1]) * len(out_of_class_df)) for i in range(len(split) - 1)]  # noqa
+
+            train_out_of_class = out_of_class_df.iloc[:split_indexes[0]]
+            val_out_od_class = out_of_class_df.iloc[split_indexes[0]:split_indexes[1]]
+            test_out_of_class = out_of_class_df.iloc[split_indexes[1]:]
+
             train = pd.concat([train, train_out_of_class], ignore_index=True)
+            val = pd.concat([val, val_out_od_class], ignore_index=True)
             test = pd.concat([test, test_out_of_class], ignore_index=True)
 
+        # Rename all authors
+        replace_dict = {author: str(i) for i, author in enumerate(self.authors)}
+        train['label'] = train['label'].replace(replace_dict)
+        val['label'] = val['label'].replace(replace_dict)
+        test['label'] = test['label'].replace(replace_dict)
+
+        # Shuffle the dataframes
         train = train.sample(frac=1).reset_index(drop=True)
+        val = val.sample(frac=1).reset_index(drop=True)
         test = test.sample(frac=1).reset_index(drop=True)
 
         if add_text_features:
             self.logger.info('Adding text features')
             _insert_features(train)
+            _insert_features(val)
             _insert_features(test)
 
         ooc_suffix = 'withOOC' if add_out_of_class else 'withoutOOC'
         train.to_csv(self.output_dir / f'train_top{num_of_authors}_{ooc_suffix}.csv', index=False)
+        val.to_csv(self.output_dir / f'val_top{num_of_authors}_{ooc_suffix}.csv', index=False)
         test.to_csv(self.output_dir / f'test_top{num_of_authors}_{ooc_suffix}.csv', index=False)
         self.logger.info(f"Dataset created and saved to '{self.output_dir}'")

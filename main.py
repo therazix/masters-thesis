@@ -75,6 +75,11 @@ scrape.add_command(scrape_csfd)
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
               callback=to_path,
               help='Training set for the model.')
+@click.option('--validation-set',
+              required=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              help='Validation set for the model.')
 @click.option('--testing-set',
               required=True,
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
@@ -100,13 +105,14 @@ scrape.add_command(scrape_csfd)
               callback=to_path,
               help='Checkpoint to resume training. Must be a directory.')
 @click.pass_context
-def train_xlm_roberta(ctx: click.Context, training_set: Path, testing_set: Path,
-                      checkpoint_dir: Path, model_dir: Path, epochs: int,
+def train_xlm_roberta(ctx: click.Context, training_set: Path, validation_set: Path,
+                      testing_set: Path, checkpoint_dir: Path, model_dir: Path, epochs: int,
                       checkpoint: Optional[Path]):
     logger = ctx.obj['logger']
     xlm_roberta = models.xlm_roberta.XLMRoberta(
-        training_set, testing_set, checkpoint_dir, model_dir, checkpoint, logger)
+        training_set, validation_set, testing_set, checkpoint_dir, model_dir, checkpoint, logger)
     xlm_roberta.train(epochs=epochs)
+    xlm_roberta.evaluate()
 
 
 @click.group()
@@ -132,11 +138,6 @@ train.add_command(train_xlm_roberta)
               required=True,
               type=int,
               help='Number of authors to extract. Authors with the most texts are selected.')
-@click.option('-s', '--train-test-split',
-              required=False,
-              type=float,
-              default=0.75,
-              help='Ratio of texts used for training. Default is 0.75.')
 @click.option('--add-out-of-class',
               required=False,
               is_flag=True,
@@ -147,12 +148,11 @@ train.add_command(train_xlm_roberta)
               help='Add text features to the dataset.')
 @click.pass_context
 def create_dataset(ctx: click.Context, input_file: Path, output_dir: Optional[Path],
-                   num_of_authors: int, train_test_split: float, add_out_of_class: bool,
-                   add_text_features: bool):
+                   num_of_authors: int, add_out_of_class: bool, add_text_features: bool):
     logger = ctx.obj['logger']
     output_dir = output_dir or Path('datasets')
     parser = dataset_parser.DatasetParser(input_file, output_dir, logger)
-    parser.create(num_of_authors, add_out_of_class, add_text_features, train_test_split)
+    parser.create(num_of_authors, add_out_of_class, add_text_features, (0.7, 0.15, 0.15))
 
 
 @click.group()

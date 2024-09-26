@@ -20,6 +20,7 @@ def process_dataset(dataset_path: Path) -> pd.DataFrame:
 class XLMRoberta:
     def __init__(self,
                  training_set: Path,
+                 validation_set: Path,
                  testing_set: Path,
                  checkpoint_dir: Path,
                  model_path: Optional[Path] = None,
@@ -33,8 +34,10 @@ class XLMRoberta:
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name_or_path)
         self.data_collator = DataCollatorWithPadding(tokenizer=self.tokenizer)
         self.train_df = process_dataset(training_set)
+        self.val_df = process_dataset(validation_set)
         self.test_df = process_dataset(testing_set)
         self.train_dataset = self._tokenize_data(Dataset.from_pandas(self.train_df, split='train'))
+        self.val_dataset = self._tokenize_data(Dataset.from_pandas(self.val_df, split='validation'))
         self.test_dataset = self._tokenize_data(Dataset.from_pandas(self.test_df, split='test'))
         self._init_directories()
         self.trainer = None
@@ -88,7 +91,7 @@ class XLMRoberta:
             model=model,
             args=training_args,
             train_dataset=self.train_dataset,
-            eval_dataset=self.test_dataset,
+            eval_dataset=self.val_dataset,
             tokenizer=self.tokenizer,
             data_collator=self.data_collator,
             compute_metrics=compute_metrics,
@@ -106,6 +109,10 @@ class XLMRoberta:
         self.tokenizer.save_pretrained(str(self.model_path / 'tokenizer'))
         self.trainer.save_model(str(self.model_path / 'model'))
         self.logger.info(f"Model saved to '{self.model_path}'")
+
+    def evaluate(self):
+        metrics = self.trainer.evaluate(self.test_dataset)
+        self.logger.info(f'Test set evaluation results: {metrics}')
 
     def predict(self, input_data: Dataset, tokenize: bool = True):
         if tokenize:
