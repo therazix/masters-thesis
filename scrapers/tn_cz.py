@@ -58,12 +58,12 @@ class TNCZScraper(Scraper):
     def _get_page(self, url: str) -> Optional[lxml.html.HtmlElement]:
         try:
             html = self._get_html(url)
-        except requests.exceptions.HTTPError as exc:
-            if exc.response.status_code == 404:
+        except RuntimeError as exc:
+            if isinstance(exc.__cause__, requests.exceptions.HTTPError) and exc.__cause__.response.status_code == 404:  # noqa
+                return None
+            if isinstance(exc.__cause__, requests.exceptions.MissingSchema):
                 return None
             raise
-        except requests.exceptions.MissingSchema:
-            return None
         return html
 
     @classmethod

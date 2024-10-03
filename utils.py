@@ -23,7 +23,7 @@ def retry_on_exception(exception: BaseException, max_retries: int = 5, sleep_tim
                     time.sleep(sleep_time)
                     LOGGER.warning(f"Function '{func.__name__}' raised an exception: '{exc}'. "
                                    f"Retry {i + 1}/{max_retries}.")
-            raise Exception(
+            raise RuntimeError(
                 f"Failed to execute '{func.__name__}', max retries exceeded.") from last_exc
         return _retry
     return decorator
