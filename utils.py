@@ -46,6 +46,11 @@ def remove_markdown(text: str) -> str:
     return strip_markdown.strip_markdown(text)
 
 
+def remove_citations(text: str) -> str:
+    text = re.sub(r'["„‚][^"„‚“‘]+,["“‘].*?\.', '', text)
+    return re.sub(r'["„‚][^"„‚“‘]+[.]["“‘]', '', text)
+
+
 def load_json(file_path: Path):
     with file_path.open('r') as file:
         return json.load(file)

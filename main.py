@@ -10,6 +10,7 @@ import click
 import dataset_parser
 import scrapers.csfd
 import scrapers.reddit
+import scrapers.tn_cz
 import models.xlm_roberta
 
 TEMP_DIR = Path(tempfile.gettempdir()) / 'DP_541699'
@@ -60,6 +61,30 @@ def scrape_csfd(ctx: click.Context, output_dir: Optional[Path],
     csfd_scraper.scrape()
 
 
+@click.command(name='tn-cz')
+@click.option('-o', '--output-dir',
+              required=False,
+              type=click.Path(file_okay=False, dir_okay=True, writable=True),
+              callback=to_path,
+              help='Output directory for scraped data.')
+@click.option('--user-agent',
+              required=False,
+              type=str,
+              help='Custom user agent.')
+@click.option('--resume',
+              required=False,
+              is_flag=True,
+              help='Continue scraping from the last saved state.')
+@click.pass_context
+def scrape_tncz(ctx: click.Context, output_dir: Optional[Path], user_agent: Optional[str],
+                resume: bool):
+    logger = ctx.obj['logger']
+    tncz_scraper = scrapers.tn_cz.TNCZScraper(TEMP_DIR / 'tn_cz', output_dir, user_agent, logger)
+    if resume:
+        tncz_scraper.load_state()
+    tncz_scraper.scrape()
+
+
 @click.group()
 def scrape():
     pass
@@ -67,6 +92,7 @@ def scrape():
 
 scrape.add_command(scrape_reddit)
 scrape.add_command(scrape_csfd)
+scrape.add_command(scrape_tncz)
 
 
 @click.command(name='xlm-roberta')
