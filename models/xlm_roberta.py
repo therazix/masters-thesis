@@ -19,28 +19,54 @@ def process_dataset(dataset_path: Path) -> pd.DataFrame:
 
 class XLMRoberta:
     def __init__(self,
-                 training_set: Path,
-                 validation_set: Path,
-                 testing_set: Path,
-                 checkpoint_dir: Path,
-                 model_path: Optional[Path] = None,
+                 training_set: Optional[Path] = None,
+                 validation_set: Optional[Path] = None,
+                 testing_set: Optional[Path] = None,
+                 checkpoint_dir: Optional[Path] = None,
                  checkpoint: Optional[Path] = None,
-                 logger: Optional[logging.Logger] = None):
-        self.checkpoint_dir = checkpoint_dir.resolve()
-        self.model_path = (model_path or checkpoint_dir).resolve()
+                 logger: Optional[logging.Logger] = None,
+                 mode: str = 'train'):
         self.logger = get_child_logger(__name__, logger)
+        self.mode = mode
         self.model_base = 'xlm-roberta-base'  # Huggingface model name
         self.model_name_or_path = str(checkpoint.resolve()) if checkpoint else self.model_base
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name_or_path)
         self.data_collator = DataCollatorWithPadding(tokenizer=self.tokenizer)
-        self.train_df = process_dataset(training_set)
-        self.val_df = process_dataset(validation_set)
-        self.test_df = process_dataset(testing_set)
-        self.train_dataset = self._tokenize_data(Dataset.from_pandas(self.train_df, split='train'))
-        self.val_dataset = self._tokenize_data(Dataset.from_pandas(self.val_df, split='validation'))
-        self.test_dataset = self._tokenize_data(Dataset.from_pandas(self.test_df, split='test'))
-        self._init_directories()
         self.trainer = None
+
+        if checkpoint_dir:
+            self.checkpoint_dir = checkpoint_dir.resolve()
+        elif checkpoint:
+            self.checkpoint_dir = checkpoint.parent.resolve()
+        else:
+            self.checkpoint_dir = (Path.cwd() / 'checkpoints').resolve()
+
+        self.train_df, self.val_df, self.test_df = None, None, None
+        self.train_dataset, self.val_dataset, self.test_dataset = None, None, None
+
+        if training_set:
+            self.train_df = process_dataset(training_set)
+            self.train_dataset = self._tokenize_data(
+                Dataset.from_pandas(self.train_df, split='train'))
+        if validation_set:
+            self.val_df = process_dataset(validation_set) if validation_set else None
+            self.val_dataset = self._tokenize_data(
+                Dataset.from_pandas(self.val_df, split='validation'))
+        if testing_set:
+            self.test_df = process_dataset(testing_set) if testing_set else None
+            self.test_dataset = self._tokenize_data(
+                Dataset.from_pandas(self.test_df, split='test'))
+        self._init_directories()
+
+
+    @classmethod
+    def for_training(cls, training_set: Path, validation_set: Path, checkpoint_dir: Path,
+                     checkpoint: Optional[Path] = None, logger: Optional[logging.Logger] = None):
+        return cls(training_set, validation_set, None, checkpoint_dir, checkpoint, logger, 'train')
+
+    @classmethod
+    def for_testing(cls, testing_set: Path, checkpoint: Path, logger: Optional[logging.Logger] = None):
+        return cls(None, None, testing_set, None, checkpoint, logger, 'test')
 
     def _tokenize_data(self, dataset: Dataset):
         def tokenize_function(examples):
@@ -57,10 +83,9 @@ class XLMRoberta:
 
     def _init_directories(self):
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        self.model_path.mkdir(parents=True, exist_ok=True)
 
-    def _get_training_args(self, epochs: int):
-        return TrainingArguments(
+    def _init_trainer(self, epochs: int):
+        training_args = TrainingArguments(
             output_dir=str(self.checkpoint_dir),
             overwrite_output_dir=True,
             learning_rate=2e-5,
@@ -76,9 +101,6 @@ class XLMRoberta:
             push_to_hub=False,
             report_to='none',
         )
-
-    def train(self, epochs: int):
-        training_args = self._get_training_args(epochs)
         num_of_authors, id2label, label2id = self._get_dataset_info()
 
         model = AutoModelForSequenceClassification.from_pretrained(
@@ -97,20 +119,25 @@ class XLMRoberta:
             compute_metrics=compute_metrics,
         )
 
+    def train(self, epochs: int):
+        if self.mode != 'train':
+            raise ValueError('Model is not in training mode.')
+
+        self._init_trainer(epochs)
+
         # Train model
         start_time = time.time()
         self.trainer.train()
         time_elapsed = time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))
         self.logger.info(f'Training completed in {time_elapsed}')
-
         self.logger.info(f'Metrics: {self.trainer.evaluate()}')
 
-        # Save model
-        self.tokenizer.save_pretrained(str(self.model_path / 'tokenizer'))
-        self.trainer.save_model(str(self.model_path / 'model'))
-        self.logger.info(f"Model saved to '{self.model_path}'")
+    def test(self):
+        if self.mode != 'test':
+            raise ValueError('Model is not in testing mode.')
 
-    def evaluate(self):
+        self._init_trainer(1)
+
         metrics = self.trainer.evaluate(self.test_dataset)
         self.logger.info(f'Test set evaluation results: {metrics}')
 

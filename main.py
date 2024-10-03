@@ -106,21 +106,11 @@ scrape.add_command(scrape_tncz)
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
               callback=to_path,
               help='Validation set for the model.')
-@click.option('--testing-set',
-              required=True,
-              type=click.Path(file_okay=True, dir_okay=False, readable=True),
-              callback=to_path,
-              help='Testing set for the model.')
 @click.option('--checkpoint-dir',
               required=True,
               type=click.Path(file_okay=False, dir_okay=True, readable=True),
               callback=to_path,
               help='Directory for model checkpoints.')
-@click.option('--model-dir',
-              required=True,
-              type=click.Path(file_okay=False, dir_okay=True, readable=True),
-              callback=to_path,
-              help='Directory for saved model.')
 @click.option('-e', '--epochs',
               required=True,
               type=int,
@@ -132,13 +122,11 @@ scrape.add_command(scrape_tncz)
               help='Checkpoint to resume training. Must be a directory.')
 @click.pass_context
 def train_xlm_roberta(ctx: click.Context, training_set: Path, validation_set: Path,
-                      testing_set: Path, checkpoint_dir: Path, model_dir: Path, epochs: int,
-                      checkpoint: Optional[Path]):
+                      checkpoint_dir: Path, epochs: int, checkpoint: Optional[Path]):
     logger = ctx.obj['logger']
-    xlm_roberta = models.xlm_roberta.XLMRoberta(
-        training_set, validation_set, testing_set, checkpoint_dir, model_dir, checkpoint, logger)
+    xlm_roberta = models.xlm_roberta.XLMRoberta.for_training(
+        training_set, validation_set, checkpoint_dir, checkpoint, logger)
     xlm_roberta.train(epochs=epochs)
-    xlm_roberta.evaluate()
 
 
 @click.group()
@@ -147,6 +135,32 @@ def train():
 
 
 train.add_command(train_xlm_roberta)
+
+
+@click.command(name='xlm-roberta')
+@click.option('--testing-set',
+              required=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              help='Testing set for the model.')
+@click.option('--checkpoint',
+              required=False,
+              type=click.Path(file_okay=False, dir_okay=True, readable=True),
+              callback=to_path,
+              help='Path to a saved model. Must be a directory.')
+@click.pass_context
+def test_xlm_roberta(ctx: click.Context, testing_set: Path, checkpoint: Optional[Path]):
+    logger = ctx.obj['logger']
+    xlm_roberta = models.xlm_roberta.XLMRoberta.for_testing(testing_set, checkpoint, logger)
+    xlm_roberta.test()
+
+
+@click.group()
+def test():
+    pass
+
+
+test.add_command(test_xlm_roberta)
 
 
 @click.command(name='create-dataset')
@@ -208,6 +222,7 @@ def cli(ctx: click.Context, verbose: int):
 
 cli.add_command(scrape)
 cli.add_command(train)
+cli.add_command(test)
 cli.add_command(create_dataset)
 
 if __name__ == "__main__":
