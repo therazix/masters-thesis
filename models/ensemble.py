@@ -10,6 +10,8 @@ import pandas as pd
 from datasets import Dataset
 from nltk.util import ngrams
 from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 from metrics import compute_metrics
 from utils import get_child_logger
@@ -90,20 +92,25 @@ class Ensemble:
 
     def _train_style(self) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         self.logger.info('Training style classifier')
-        lr = LogisticRegression(random_state=0).fit(self.train_features_df, self.train_df['label'])
+
+        pipeline = Pipeline([
+            ('scaler', StandardScaler()),
+            ('lr', LogisticRegression(random_state=0))
+        ])
+        pipeline.fit(self.train_features_df, self.train_df['label'])
 
         # Save model
         filepath = self.output_dir / 'lr_style.pkl'
         with filepath.open('wb') as f:
-            pickle.dump(lr, f)
+            pickle.dump(pipeline, f)
 
-        train_proba = lr.predict_proba(self.train_features_df)
+        train_proba = pipeline.predict_proba(self.train_features_df)
 
         if self.test_df is not None:
-            test_pred = lr.predict(self.test_features_df)
+            test_pred = pipeline.predict(self.test_features_df)
             metrics = compute_metrics(self.test_df['label'], test_pred)
             self.logger.info(f'Style classifier metrics: {metrics}')
-            test_proba = lr.predict_proba(self.test_features_df)
+            test_proba = pipeline.predict_proba(self.test_features_df)
             return train_proba, test_proba
 
         return train_proba, None
@@ -112,21 +119,25 @@ class Ensemble:
         self.logger.info('Training n-grams classifier')
         train_ngrams_df = self._get_ngram_frequencies(self.train_df)
 
-        lr = LogisticRegression(random_state=0).fit(train_ngrams_df, self.train_df['label'])
+        pipeline = Pipeline([
+            ('scaler', StandardScaler()),
+            ('lr', LogisticRegression(random_state=0))
+        ])
+        pipeline.fit(train_ngrams_df, self.train_df['label'])
 
         # Save model
         filepath = self.output_dir / 'lr_ngrams.pkl'
         with filepath.open('wb') as f:
-            pickle.dump(lr, f)
+            pickle.dump(pipeline, f)
 
-        train_proba = lr.predict_proba(train_ngrams_df)
+        train_proba = pipeline.predict_proba(train_ngrams_df)
 
         if self.test_df is not None:
             test_ngrams_df = self._get_ngram_frequencies(self.test_df)
-            test_pred = lr.predict(test_ngrams_df)
+            test_pred = pipeline.predict(test_ngrams_df)
             metrics = compute_metrics(self.test_df['label'], test_pred)
             self.logger.info(f'N-grams classifier metrics: {metrics}')
-            test_proba = lr.predict_proba(test_ngrams_df)
+            test_proba = pipeline.predict_proba(test_ngrams_df)
             return train_proba, test_proba
 
         return train_proba, None
@@ -143,17 +154,21 @@ class Ensemble:
         train_combined = np.concatenate(
             [model_train_proba, style_train_proba, ngrams_train_proba], axis=1)
 
-        lr = LogisticRegression(random_state=0).fit(train_combined, self.train_df['label'])
+        pipeline = Pipeline([
+            ('scaler', StandardScaler()),
+            ('lr', LogisticRegression(random_state=0))
+        ])
+        pipeline.fit(train_combined, self.train_df['label'])
 
         # Save model
         filepath = self.output_dir / 'lr_final.pkl'
         with filepath.open('wb') as f:
-            pickle.dump(lr, f)
+            pickle.dump(pipeline, f)
 
         if self.test_df is not None:
             test_combined = np.concatenate(
                 [model_test_proba, style_test_proba, ngrams_test_proba], axis=1)
-            test_pred = lr.predict(test_combined)
+            test_pred = pipeline.predict(test_combined)
             metrics = compute_metrics(self.test_df['label'], test_pred)
             self.logger.info(f'Final classifier metrics: {metrics}')
 
