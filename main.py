@@ -9,6 +9,7 @@ import click
 
 import dataset_parser
 import models.ensemble
+import models.mistral
 import models.xlm_roberta
 import scrapers.csfd
 import scrapers.reddit
@@ -229,6 +230,37 @@ def test_ensemble(ctx: click.Context, model: Path, classifiers_dir: Path, testin
     ensemble.test(classifiers_dir, testing_set)
 
 
+@click.command(name='mistral')
+@click.option('--dataset',
+              required=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              help='Testing set for the model.')
+@click.option('--crop',
+              required=False,
+              is_flag=True,
+              help='Crop all texts from dataset to fit the model input size. '
+                   'If not provided, texts that are too long will be skipped.')
+@click.option('--reps',
+              required=False,
+              type=int,
+              default=3,
+              show_default=True,
+              help='Number of repetitions for testing.')
+@click.option('--token',
+              required=False,
+              type=str,
+              help='Hugging Face API token. If not provided, HF_TOKEN environment '
+                   'variable will be used.')
+@click.pass_context
+def test_mistral(ctx: click.Context, dataset: Path, crop: bool, reps: int, token: Optional[str] = None):
+    logger = ctx.obj['logger']
+    if reps < 1:
+        raise ValueError('Number of repetitions must be at least 1')
+    mistral = models.mistral.Mistral(dataset, crop, token, logger)
+    mistral.test(reps)
+
+
 @click.group()
 def test():
     pass
@@ -236,6 +268,7 @@ def test():
 
 test.add_command(test_xlm_roberta)
 test.add_command(test_ensemble)
+test.add_command(test_mistral)
 
 
 ### Other commands ###
@@ -288,10 +321,14 @@ def cli(ctx: click.Context, verbose: int):
     file_handler.setFormatter(formater)
     logger.addHandler(file_handler)  # Log to file
 
-    if verbose > 0:
+    if verbose >= 1:
+        # Print log messages to console
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formater)
-        logger.addHandler(console_handler)  # Log also to stdout
+        logger.addHandler(console_handler)
+    if verbose >= 2:
+        # Log also debug messages
+        logger.setLevel(logging.DEBUG)
 
     ctx.ensure_object(dict)
     ctx.obj['logger'] = logger

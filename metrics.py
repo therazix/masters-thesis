@@ -9,7 +9,8 @@ def compute_metrics(labels: np.ndarray, predictions: np.ndarray):
     :param predictions: 1D array of predicted labels
     :return: dictionary of metrics
     """
-    precision, recall, f1, _ = precision_recall_fscore_support(labels, predictions, average='macro')
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        labels, predictions, average='macro', zero_division=0)
     acc = accuracy_score(labels, predictions)
     return {
         'accuracy': acc,
