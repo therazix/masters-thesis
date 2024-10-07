@@ -231,11 +231,16 @@ def test_ensemble(ctx: click.Context, model: Path, classifiers_dir: Path, testin
 
 
 @click.command(name='mistral')
-@click.option('--dataset',
+@click.option('--testing-set',
               required=True,
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
               callback=to_path,
               help='Testing set for the model.')
+@click.option('--lang',
+              required=False,
+              type=str,
+              default='cz',
+              help="What language to use for the model's instructions. Either 'cz' or 'en'.")
 @click.option('--crop',
               required=False,
               is_flag=True,
@@ -253,11 +258,11 @@ def test_ensemble(ctx: click.Context, model: Path, classifiers_dir: Path, testin
               help='Hugging Face API token. If not provided, HF_TOKEN environment '
                    'variable will be used.')
 @click.pass_context
-def test_mistral(ctx: click.Context, dataset: Path, crop: bool, reps: int, token: Optional[str] = None):
+def test_mistral(ctx: click.Context, testing_set: Path, lang: str, crop: bool, reps: int, token: Optional[str] = None):
     logger = ctx.obj['logger']
     if reps < 1:
         raise ValueError('Number of repetitions must be at least 1')
-    mistral = models.mistral.Mistral(dataset, crop, token, logger)
+    mistral = models.mistral.Mistral(testing_set, lang, crop, token, logger)
     mistral.test(reps)
 
 
@@ -273,7 +278,7 @@ test.add_command(test_mistral)
 
 ### Other commands ###
 
-@click.command(name='create-dataset')
+@click.command(name='create')
 @click.option('-i', '--input-file',
               required=True,
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
@@ -297,12 +302,33 @@ test.add_command(test_mistral)
               is_flag=True,
               help='Add text features to the dataset.')
 @click.pass_context
-def create_dataset(ctx: click.Context, input_file: Path, output_dir: Optional[Path],
+def dataset_create(ctx: click.Context, input_file: Path, output_dir: Optional[Path],
                    num_of_authors: int, add_out_of_class: bool, add_text_features: bool):
     logger = ctx.obj['logger']
     output_dir = output_dir or Path('datasets')
-    parser = dataset_parser.DatasetParser(input_file, output_dir, logger)
-    parser.create(num_of_authors, add_out_of_class, add_text_features, (0.7, 0.15, 0.15))
+    parser = dataset_parser.DatasetParser(input_file, logger)
+    parser.create(output_dir, num_of_authors, add_out_of_class, add_text_features, (0.7, 0.15, 0.15))
+
+
+@click.command(name='info')
+@click.option('-i', '--input-file',
+              required=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              help='Path to the dataset.')
+@click.pass_context
+def dataset_info(ctx: click.Context, input_file: Path):
+    logger = ctx.obj['logger']
+    parser = dataset_parser.DatasetParser(input_file, logger)
+    parser.info()
+
+
+@click.group()
+def dataset():
+    pass
+
+dataset.add_command(dataset_create)
+dataset.add_command(dataset_info)
 
 
 @click.group()
@@ -337,7 +363,7 @@ def cli(ctx: click.Context, verbose: int):
 cli.add_command(scrape)
 cli.add_command(train)
 cli.add_command(test)
-cli.add_command(create_dataset)
+cli.add_command(dataset)
 
 if __name__ == "__main__":
     cli()

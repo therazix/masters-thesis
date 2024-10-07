@@ -9,11 +9,12 @@ from pandarallel import pandarallel
 
 from utils import get_child_logger
 
-pandarallel.initialize()
 pd.options.mode.chained_assignment = None
 
 CHARS = 'aábcčdďeéěfghiíjklmnňoópqrřsštťuúůvwxyýzž' + '0123456789' + '.!?"„“,:-();/&'
 
+def _init_pandarallel():
+    pandarallel.initialize()
 
 def _extract_style(text: str):
     words = text.split()
@@ -50,52 +51,35 @@ def _insert_features(df: pd.DataFrame):
 class DatasetParser:
     def __init__(self,
                  input_file: Path,
-                 output_dir: Path,
                  logger: Optional[logging.Logger] = None):
+        self.output_dir = Path('datasets/')
         self.input_file = input_file.resolve()
-        self.output_dir = output_dir.resolve()
         self.logger = get_child_logger(__name__, logger)
+        self.logger.debug(f"Reading input file '{self.input_file}'")
+        self.df = pd.read_csv(self.input_file)
+        self.authors = 0
 
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        df = pd.read_csv(self.input_file)
-        if 'author' not in df.columns or 'text' not in df.columns:
-            raise ValueError("Input file must have columns 'author' and 'text'")
-        df = df[['author', 'text']]
-        df = df.rename(columns={'author': 'label'})
-        self.df = df.drop_duplicates()
-        # Get all author names sorted by the number of texts
+    def info(self):
+        if 'label' not in self.df.columns or 'text' not in self.df.columns:
+            raise ValueError("Dataset must have columns 'author' and 'text'")
         self.authors = self.df['label'].value_counts().index.tolist()
-        self._log_data_info()
-
-    def _log_data_info(self):
         info = {
-            'total_num_texts': len(self.df),
-            'total_num_authors': len(self.authors),
-            'total_avg_text_length': self.df['text'].apply(len).mean(),
-            'total_min_text_length': self.df['text'].apply(len).min(),
-            'total_max_text_length': self.df['text'].apply(len).max(),
-            'total_avg_texts_per_author': self.df['label'].value_counts().mean(),
-            'total_min_texts_per_author': self.df['label'].value_counts().min(),
-            'total_max_texts_per_author': self.df['label'].value_counts().max(),
+            'num_of_texts': len(self.df),
+            'num_of_authors': len(self.authors),
+            'avg_text_length': round(self.df['text'].apply(len).mean(), 2),
+            'min_text_length': self.df['text'].apply(len).min(),
+            'max_text_length': self.df['text'].apply(len).max(),
+            'avg_texts_per_author': round(self.df['label'].value_counts().mean(), 2),
+            'min_texts_per_author': self.df['label'].value_counts().min(),
+            'max_texts_per_author': self.df['label'].value_counts().max(),
         }
-        for i in [5, 10, 20, 50]:
-            if i > len(self.authors):
-                break
-            top_authors = self.df['label'].value_counts().index[:i]
-            info[f'top{i}_num_texts'] = self.df['label'].value_counts().loc[top_authors].sum()
-            info[f'top{i}_avg_text_length'] = self.df[self.df['label'].isin(top_authors)]['text'].apply(len).mean()  # noqa
-            info[f'top{i}_min_text_length'] = self.df[self.df['label'].isin(top_authors)]['text'].apply(len).min()  # noqa
-            info[f'top{i}_max_text_length'] = self.df[self.df['label'].isin(top_authors)]['text'].apply(len).max()  # noqa
-            info[f'top{i}_avg_texts_per_author'] = self.df[self.df['label'].isin(top_authors)]['label'].value_counts().mean()  # noqa
-            info[f'top{i}_min_texts_per_author'] = self.df[self.df['label'].isin(top_authors)]['label'].value_counts().min()  # noqa
-            info[f'top{i}_max_texts_per_author'] = self.df[self.df['label'].isin(top_authors)]['label'].value_counts().max()  # noqa
 
-        self.logger.info('Data information:')
+        self.logger.info('Dataset information:')
         for key, value in info.items():
-            self.logger.info(f"{key}: {value}")
+            self.logger.info(f"  {key}: {value}")
 
     def create(self,
+               output_dir: Path,
                num_of_authors: int,
                add_out_of_class: bool = False,
                add_text_features: bool = False,
@@ -104,6 +88,22 @@ class DatasetParser:
             raise ValueError('Number of authors must be at least 1')
         if sum(split) != 1:
             raise ValueError('Sum of split values must be 1')
+
+        if 'author' not in self.df.columns or 'text' not in self.df.columns:
+            raise ValueError("Input file must have columns 'author' and 'text'")
+
+        self.logger.debug('Creating dataset...')
+        _init_pandarallel()
+
+        self.df = self.df[['author', 'text']]
+        self.df = self.df.rename(columns={'author': 'label'})
+        self.df = self.df.drop_duplicates()
+
+        # Get all author names sorted by the number of texts
+        self.authors = self.df['label'].value_counts().index.tolist()
+
+        self.output_dir = output_dir.resolve()
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
         selected_authors = self.authors[:num_of_authors]
         non_selected_authors = self.authors[num_of_authors:]
@@ -169,8 +169,8 @@ class DatasetParser:
             _insert_features(val)
             _insert_features(test)
 
-        ooc_suffix = 'withOOC' if add_out_of_class else 'withoutOOC'
-        train.to_csv(self.output_dir / f'train_top{num_of_authors}_{ooc_suffix}.csv', index=False)
-        val.to_csv(self.output_dir / f'val_top{num_of_authors}_{ooc_suffix}.csv', index=False)
-        test.to_csv(self.output_dir / f'test_top{num_of_authors}_{ooc_suffix}.csv', index=False)
+        ooc_suffix = '_withOOC' if add_out_of_class else ''
+        train.to_csv(self.output_dir / f'train_top{num_of_authors}{ooc_suffix}.csv', index=False)
+        val.to_csv(self.output_dir / f'val_top{num_of_authors}{ooc_suffix}.csv', index=False)
+        test.to_csv(self.output_dir / f'test_top{num_of_authors}{ooc_suffix}.csv', index=False)
         self.logger.info(f"Dataset created and saved to '{self.output_dir}'")
