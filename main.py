@@ -3,7 +3,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import click
 
@@ -316,11 +316,18 @@ def dataset_create(ctx: click.Context, input_file: Path, output_dir: Optional[Pa
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
               callback=to_path,
               help='Path to the dataset.')
+@click.option('-t', '--top',
+              multiple=True,
+              type=int,
+              default=[],
+              help='Show also information for the top N authors.')
 @click.pass_context
-def dataset_info(ctx: click.Context, input_file: Path):
+def dataset_info(ctx: click.Context, input_file: Path, top: List[int]):
     logger = ctx.obj['logger']
     parser = dataset_parser.DatasetParser(input_file, logger)
-    parser.info()
+    top = list(set([t for t in top if t > 0]))
+    top.sort()
+    parser.info(top)
 
 
 @click.group()

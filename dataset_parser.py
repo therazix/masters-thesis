@@ -1,7 +1,7 @@
 import logging
 import math
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import numpy as np
 import pandas as pd
@@ -56,23 +56,43 @@ class DatasetParser:
         self.input_file = input_file.resolve()
         self.logger = get_child_logger(__name__, logger)
         self.logger.debug(f"Reading input file '{self.input_file}'")
-        self.df = pd.read_csv(self.input_file)
-        self.authors = 0
+        df = pd.read_csv(self.input_file)
 
-    def info(self):
-        if 'label' not in self.df.columns or 'text' not in self.df.columns:
-            raise ValueError("Dataset must have columns 'author' and 'text'")
+        if 'text' not in df.columns:
+            raise ValueError("Input file must have a 'text' column")
+
+        if 'author' in df.columns:
+            df = df[['author', 'text']]
+            df = df.rename(columns={'author': 'label'})
+
+        if 'label' not in df.columns:
+            raise ValueError("Input file must have a 'label' or 'author' column")
+
+        self.df = df.drop_duplicates()
+
+        # Get all author names sorted by the number of texts
         self.authors = self.df['label'].value_counts().index.tolist()
+
+    def info(self, top: List[int]):
         info = {
-            'num_of_texts': len(self.df),
-            'num_of_authors': len(self.authors),
-            'avg_text_length': round(self.df['text'].apply(len).mean(), 2),
-            'min_text_length': self.df['text'].apply(len).min(),
-            'max_text_length': self.df['text'].apply(len).max(),
-            'avg_texts_per_author': round(self.df['label'].value_counts().mean(), 2),
-            'min_texts_per_author': self.df['label'].value_counts().min(),
-            'max_texts_per_author': self.df['label'].value_counts().max(),
+            'total_num_of_texts': len(self.df),
+            'total_num_of_authors': len(self.authors),
+            'total_avg_text_length': round(self.df['text'].apply(len).mean(), 2),
+            'total_min_text_length': self.df['text'].apply(len).min(),
+            'total_max_text_length': self.df['text'].apply(len).max(),
+            'total_avg_texts_per_author': round(self.df['label'].value_counts().mean(), 2),
+            'total_min_texts_per_author': self.df['label'].value_counts().min(),
+            'total_max_texts_per_author': self.df['label'].value_counts().max(),
         }
+        for i in top:
+            top_authors = self.df['label'].value_counts().index[:i]
+            info[f'top{i}_num_texts'] = self.df['label'].value_counts().loc[top_authors].sum()
+            info[f'top{i}_avg_text_length'] = self.df[self.df['label'].isin(top_authors)]['text'].apply(len).mean()  # noqa
+            info[f'top{i}_min_text_length'] = self.df[self.df['label'].isin(top_authors)]['text'].apply(len).min()  # noqa
+            info[f'top{i}_max_text_length'] = self.df[self.df['label'].isin(top_authors)]['text'].apply(len).max()  # noqa
+            info[f'top{i}_avg_texts_per_author'] = self.df[self.df['label'].isin(top_authors)]['label'].value_counts().mean()  # noqa
+            info[f'top{i}_min_texts_per_author'] = self.df[self.df['label'].isin(top_authors)]['label'].value_counts().min()  # noqa
+            info[f'top{i}_max_texts_per_author'] = self.df[self.df['label'].isin(top_authors)]['label'].value_counts().max()  # noqa
 
         self.logger.info('Dataset information:')
         for key, value in info.items():
@@ -89,18 +109,8 @@ class DatasetParser:
         if sum(split) != 1:
             raise ValueError('Sum of split values must be 1')
 
-        if 'author' not in self.df.columns or 'text' not in self.df.columns:
-            raise ValueError("Input file must have columns 'author' and 'text'")
-
         self.logger.debug('Creating dataset...')
         _init_pandarallel()
-
-        self.df = self.df[['author', 'text']]
-        self.df = self.df.rename(columns={'author': 'label'})
-        self.df = self.df.drop_duplicates()
-
-        # Get all author names sorted by the number of texts
-        self.authors = self.df['label'].value_counts().index.tolist()
 
         self.output_dir = output_dir.resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
