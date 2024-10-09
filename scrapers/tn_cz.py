@@ -75,8 +75,15 @@ class TNCZScraper(Scraper):
         html = self._get_page(article_url)
         if html is None:
             return
-        p_list = html.xpath('//div[contains(@class, "c-hero-wrapper")]//div[contains(@class, "c-content-inner")]//div[@class="c-rte"]//p')  # noqa
-        text = '\n'.join(p.text_content() for p in p_list)
+
+        ignore_cls = ['c-card', 'c-player', 'twitter-tweet', 'instagram-media', 'c-inline-gallery', 'img']
+        for cls in ignore_cls:
+            elements_to_del = html.xpath(f'//*[contains(@class, "{cls}")]')
+            for element in elements_to_del:
+                element.getparent().remove(element)
+
+        p_list = html.xpath('//div[contains(@class, "c-hero-wrapper")]//div[contains(@class, "c-content-inner")]//div[@class="c-rte"]''//p')  # noqa
+        text = '\n'.join([p.text_content().strip() for p in p_list if p.text_content().strip()])
         text = self._parse_article(text)
         if text:
             writer.writerow((user_id, article_url, text))
