@@ -8,9 +8,9 @@ import pandas as pd
 import prompts
 from utils import get_child_logger
 from . import LLM
+import transformers
 
-
-class Mistral(LLM):
+class Llama3(LLM):
     def __init__(self,
                  dataset_path: Path,
                  lang: str,
@@ -21,13 +21,12 @@ class Mistral(LLM):
             raise ValueError("Language must be either 'en' or 'cz'")
 
         super().__init__(
-            model_name='mistralai/Mistral-7B-Instruct-v0.3',
+            model_name='meta-llama/Llama-3.1-8B-Instruct',
             dataset_path=dataset_path,
             crop=crop,
             template=prompts.prompts_en if lang == 'en' else prompts.prompts_cz,
             hf_token=hf_token,
             logger=get_child_logger(__name__, logger))
-
 
     def _generate(self, query: str, examples: str):
         messages = [
@@ -41,13 +40,13 @@ class Mistral(LLM):
             }
         ]
         tokenized_messages = self.tokenizer.apply_chat_template(messages,
-                                                          return_tensors='pt',
-                                                          add_generation_prompt=True).to('cuda')
+                                                           return_tensors='pt',
+                                                           add_generation_prompt=True).to('cuda')
         prompt_length = tokenized_messages.size(-1)
         outputs = self.model.generate(tokenized_messages,
                                       top_p=1.0,
-                                      max_new_tokens=self.max_new_tokens,
                                       do_sample=False,
+                                      max_new_tokens=self.max_new_tokens,
                                       pad_token_id=self.tokenizer.eos_token_id)
         return self.tokenizer.decode(outputs[0][prompt_length:], skip_special_tokens=True)
 
@@ -57,7 +56,7 @@ class Mistral(LLM):
             json_end = len(text) - text[::-1].index('}')
             text = text[json_start:json_end]
             response = json.loads(text, strict=False)
-        except (json.JSONDecodeError, IndexError) as err:
+        except (json.JSONDecodeError, IndexError, ValueError) as err:
             self.logger.info('Error while decoding response: ' + str(err))
             response = json.loads('{}')
             response['analysis'] = text

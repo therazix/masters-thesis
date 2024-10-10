@@ -9,6 +9,7 @@ import click
 
 import dataset_parser
 import models.ensemble
+import models.llama3
 import models.mistral
 import models.xlm_roberta
 import scrapers.csfd
@@ -266,6 +267,42 @@ def test_mistral(ctx: click.Context, testing_set: Path, lang: str, crop: bool, r
     mistral.test(reps)
 
 
+@click.command(name='llama3')
+@click.option('--testing-set',
+              required=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              help='Testing set for the model.')
+@click.option('--lang',
+              required=False,
+              type=str,
+              default='cz',
+              help="What language to use for the model's instructions. Either 'cz' or 'en'.")
+@click.option('--crop',
+              required=False,
+              is_flag=True,
+              help='Crop all texts from dataset to fit the model input size. '
+                   'If not provided, texts that are too long will be skipped.')
+@click.option('--reps',
+              required=False,
+              type=int,
+              default=3,
+              show_default=True,
+              help='Number of repetitions for testing.')
+@click.option('--token',
+              required=False,
+              type=str,
+              help='Hugging Face API token. If not provided, HF_TOKEN environment '
+                   'variable will be used.')
+@click.pass_context
+def test_llama3(ctx: click.Context, testing_set: Path, lang: str, crop: bool, reps: int, token: Optional[str] = None):
+    logger = ctx.obj['logger']
+    if reps < 1:
+        raise ValueError('Number of repetitions must be at least 1')
+    llama3 = models.llama3.Llama3(testing_set, lang, crop, token, logger)
+    llama3.test(reps)
+
+
 @click.group()
 def test():
     pass
@@ -274,6 +311,7 @@ def test():
 test.add_command(test_xlm_roberta)
 test.add_command(test_ensemble)
 test.add_command(test_mistral)
+test.add_command(test_llama3)
 
 
 ### Other commands ###
