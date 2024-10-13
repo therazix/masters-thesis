@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -46,6 +47,7 @@ class Mistral(LLM):
         prompt_length = tokenized_messages.size(-1)
         outputs = self.model.generate(tokenized_messages,
                                       top_p=1.0,
+                                      temperature=None,
                                       max_new_tokens=self.max_new_tokens,
                                       do_sample=False,
                                       pad_token_id=self.tokenizer.eos_token_id)
@@ -57,11 +59,15 @@ class Mistral(LLM):
             json_end = len(text) - text[::-1].index('}')
             text = text[json_start:json_end]
             response = json.loads(text, strict=False)
-        except (json.JSONDecodeError, IndexError) as err:
-            self.logger.info('Error while decoding response: ' + str(err))
+        except (json.JSONDecodeError, IndexError, ValueError) as err:
+            matches = re.findall(r'["\']?answer["\']?: ["\']?(\d+)["\']?', text)
             response = json.loads('{}')
             response['analysis'] = text
-            response['answer'] = 'error'
+            if matches:
+                response['answer'] = matches[-1]
+            else:
+                response['answer'] = 'error'
+                self.logger.error(f'Failed to parse response: {text}')
         return response
 
     def test(self, reps: int):

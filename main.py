@@ -80,14 +80,20 @@ def scrape_csfd(ctx: click.Context, output_dir: Optional[Path],
               required=False,
               is_flag=True,
               help='Continue scraping from the last saved state.')
+@click.option('--limit',
+              required=False,
+              type=int,
+              help='Maximum number of articles to scrape per user.')
 @click.pass_context
 def scrape_tncz(ctx: click.Context, output_dir: Optional[Path], user_agent: Optional[str],
-                resume: bool):
+                resume: bool, limit: Optional[int]):
     logger = ctx.obj['logger']
     tncz_scraper = scrapers.tn_cz.TNCZScraper(TEMP_DIR / 'tn_cz', output_dir, user_agent, logger)
     if resume:
         tncz_scraper.load_state()
-    tncz_scraper.scrape()
+    if limit is not None and limit < 1:
+        limit = None
+    tncz_scraper.scrape(limit)
 
 
 @click.group()
@@ -331,6 +337,11 @@ test.add_command(test_llama3)
               required=True,
               type=int,
               help='Number of authors to extract. Authors with the most texts are selected.')
+@click.option('-l', '--limit',
+              required=False,
+              type=int,
+              default=None,
+              help='Maximum number of texts per author. If not provided, all texts are used.')
 @click.option('--add-out-of-class',
               required=False,
               is_flag=True,
@@ -341,11 +352,12 @@ test.add_command(test_llama3)
               help='Add text features to the dataset.')
 @click.pass_context
 def dataset_create(ctx: click.Context, input_file: Path, output_dir: Optional[Path],
-                   num_of_authors: int, add_out_of_class: bool, add_text_features: bool):
+                   num_of_authors: int, limit: Optional[int], add_out_of_class: bool,
+                   add_text_features: bool):
     logger = ctx.obj['logger']
     output_dir = output_dir or Path('datasets')
     parser = dataset_parser.DatasetParser(input_file, logger)
-    parser.create(output_dir, num_of_authors, add_out_of_class, add_text_features, (0.7, 0.15, 0.15))
+    parser.create(output_dir, num_of_authors, limit, add_out_of_class, add_text_features, (0.7, 0.15, 0.15))
 
 
 @click.command(name='info')

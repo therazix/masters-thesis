@@ -71,10 +71,10 @@ class TNCZScraper(Scraper):
         text = remove_citations(text)
         return cls._parse_author_text(text, check_language=False)
 
-    def _scrape_article(self, user_id: int, article_url: str, writer: csv.writer):
+    def _scrape_article(self, user_id: int, article_url: str, writer: csv.writer) -> bool:
         html = self._get_page(article_url)
         if html is None:
-            return
+            return False
 
         ignore_cls = ['c-card', 'c-player', 'twitter-tweet', 'instagram-media', 'c-inline-gallery', 'img']
         for cls in ignore_cls:
@@ -87,9 +87,12 @@ class TNCZScraper(Scraper):
         text = self._parse_article(text)
         if text:
             writer.writerow((user_id, article_url, text))
+            return True
+        return False
 
-    def _scrape_user(self, user_id: int, writer: csv.writer):
+    def _scrape_user(self, user_id: int, writer: csv.writer, limit: Optional[int] = None):
         page = 1
+        articles = 0
         html = self._get_page(f'https://tn.nova.cz/autor/{user_id}/strana-{page}')
         if html is None or html.xpath('//div[@class="c-404"]'):
             self.logger.info(f"User {user_id} not found, skipping")
@@ -102,7 +105,7 @@ class TNCZScraper(Scraper):
         except IndexError:
             last_page = 1
 
-        while page <= last_page:
+        while not _limit_reached(articles, limit) and page <= last_page:
             if page > 1:
                 html = self._get_page(f'https://tn.nova.cz/autor/{user_id}/strana-{page}')
                 if html is None:
@@ -111,12 +114,13 @@ class TNCZScraper(Scraper):
                     '//div[contains(@class, "c-content-inner")]//section[@class="c-section-inner"]'):  # noqa
                 for article_url in section.xpath(
                         './/article[contains(@class, "c-article")]//h3[@class="title"]/a/@href'):
-                    self._scrape_article(user_id, article_url, writer)
+                    if self._scrape_article(user_id, article_url, writer):
+                        articles += 1
             self.logger.debug(f"Scraped page {page}/{last_page} of user {user_id}")
             page += 1
         self.logger.info(f"Scraped all articles of user {user_id}")
 
-    def scrape(self):
+    def scrape(self, limit: Optional[int] = None):
         self._init_directories()
         self.users = self.users or {user_id: False for user_id in range(1, 1000)}
         self.output_file = self.output_file or self.output_dir / f'tncz_{time.strftime("%y%m%d_%H%M%S")}.csv'  # noqa
@@ -132,6 +136,9 @@ class TNCZScraper(Scraper):
             writer.writerow(('author', 'article_url', 'text'))  # Header
             # Enumerate all users
             for user_id in users_to_scrape:
-                self._scrape_user(user_id, writer)
+                self._scrape_user(user_id, writer, limit)
                 self.users[user_id] = True
                 self.save_state()
+
+def _limit_reached(current: int, maximum: Optional[int]) -> bool:
+    return maximum is not None and current >= maximum

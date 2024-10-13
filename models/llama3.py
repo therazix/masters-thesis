@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -8,7 +9,7 @@ import pandas as pd
 import prompts
 from utils import get_child_logger
 from . import LLM
-import transformers
+
 
 class Llama3(LLM):
     def __init__(self,
@@ -45,6 +46,7 @@ class Llama3(LLM):
         prompt_length = tokenized_messages.size(-1)
         outputs = self.model.generate(tokenized_messages,
                                       top_p=1.0,
+                                      temperature=None,
                                       do_sample=False,
                                       max_new_tokens=self.max_new_tokens,
                                       pad_token_id=self.tokenizer.eos_token_id)
@@ -57,10 +59,14 @@ class Llama3(LLM):
             text = text[json_start:json_end]
             response = json.loads(text, strict=False)
         except (json.JSONDecodeError, IndexError, ValueError) as err:
-            self.logger.info('Error while decoding response: ' + str(err))
+            matches = re.findall(r'["\']?answer["\']?: ["\']?(\d+)["\']?', text)
             response = json.loads('{}')
             response['analysis'] = text
-            response['answer'] = 'error'
+            if matches:
+                response['answer'] = matches[-1]
+            else:
+                response['answer'] = 'error'
+                self.logger.error(f'Failed to parse response: {text}')
         return response
 
     def test(self, reps: int):

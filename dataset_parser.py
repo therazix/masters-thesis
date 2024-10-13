@@ -1,5 +1,6 @@
 import logging
 import math
+import re
 from pathlib import Path
 from typing import Optional, Tuple, List
 
@@ -11,9 +12,14 @@ from utils import get_child_logger
 
 pd.options.mode.chained_assignment = None
 
-CHARS = 'aábcčdďeéěfghiíjklmnňoópqrřsštťuúůvwxyýzž' + '0123456789' + '.!?"„“,:-();/&'
+CHARS = 'abcdefghijklmnopqrstuvwxyz'
+DIGITS = '0123456789'
+PUNCTUATION = '.:,?!-;('
+DIACRITICS = 'áčďéěíňóřšťúůýž'
 
 def _init_pandarallel():
+    from warnings import simplefilter
+    simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
     pandarallel.initialize()
 
 def _extract_style(text: str):
@@ -27,25 +33,17 @@ def _extract_style(text: str):
     per_cap = sum(1 for c in text if c.isupper()) / len_text  # Percentage of capital letters
     richness = len(list(set(words))) / len_words  # Ratio of unique words to all words
     # Frequencies of each character relative to the whole text
-    frequencies = {char: sum(1 for c in text if c.lower() == char) / len_text for char in CHARS}
+    all_chars = CHARS + DIGITS + DIACRITICS
+    frequencies = {char: sum(1 for c in text if c.lower() == char) / len_text for char in all_chars}
 
     return pd.Series(
-        [avg_len, len_text, len_words, num_short_w,
-         per_digit, per_cap, *frequencies.values(), richness]
+        [avg_len, len_text, len_words, num_short_w, per_digit, per_cap, richness, *frequencies.values()]
     )
 
-
 def _insert_features(df: pd.DataFrame):
-    df[['avg_len', 'len_text', 'len_words', 'num_short_w',
-        'per_digit', 'per_cap', 'f_0', 'f_1', 'f_2', 'f_3', 'f_4', 'f_5', 'f_6',
-        'f_7', 'f_8', 'f_9', 'f_10', 'f_11', 'f_12', 'f_13', 'f_14', 'f_15',
-        'f_16', 'f_17', 'f_18', 'f_19', 'f_20', 'f_21', 'f_22', 'f_23', 'f_24',
-        'f_25', 'f_26', 'f_27', 'f_28', 'f_29', 'f_30', 'f_31', 'f_32', 'f_33',
-        'f_34', 'f_35', 'f_36', 'f_37', 'f_38', 'f_39', 'f_40', 'f_41', 'f_42',
-        'f_43', 'f_44', 'f_45', 'f_46', 'f_47', 'f_48', 'f_49', 'f_50', 'f_51',
-        'f_52', 'f_53', 'f_54', 'f_55', 'f_56', 'f_57', 'f_58', 'f_59', 'f_60',
-        'f_61', 'f_62', 'f_63', 'f_64', 'richness']] = df['text'].parallel_apply(
-        lambda x: _extract_style(x))  # noqa
+    columns = ['avg_len', 'len_text', 'len_words', 'num_short_w', 'per_digit', 'per_cap', 'richness']
+    columns += [f'cf_{c}' for c in CHARS + DIGITS + DIACRITICS]
+    df[columns] = df['text'].parallel_apply( lambda x: _extract_style(x))
 
 
 class DatasetParser:
@@ -101,11 +99,14 @@ class DatasetParser:
     def create(self,
                output_dir: Path,
                num_of_authors: int,
+               limit: Optional[int] = None,
                add_out_of_class: bool = False,
                add_text_features: bool = False,
                split: Tuple[float, float, float] = (0.7, 0.15, 0.15)):
         if num_of_authors < 1:
             raise ValueError('Number of authors must be at least 1')
+        if limit is not None and limit < 1:
+            raise ValueError('Limit must be at least 1')
         if sum(split) != 1:
             raise ValueError('Sum of split values must be 1')
 
@@ -125,6 +126,10 @@ class DatasetParser:
 
         for author in selected_authors:
             author_df = self.df[self.df['label'] == author]  # Get all texts of the author
+            if limit is not None:
+                author_df = author_df.head(limit)
+                if len(author_df) < limit:
+                    self.logger.warning(f"Author '{author}' has less than {limit} texts")
             author_df = author_df.sample(frac=1).reset_index(drop=True)  # Shuffle author's texts
             # Get the indexes for splitting the author's texts into train, validation and test sets
             split_indexes = [int(sum(split[:i+1]) * len(author_df)) for i in range(len(split) - 1)]

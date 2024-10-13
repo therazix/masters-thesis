@@ -4,44 +4,41 @@ prompts_en = {
     'system': textwrap.dedent('''\
         Respond with a JSON object including two key elements:
         {
-        "analysis": "Reasoning behind your answer.",
-        "answer": "The query text’s author ID."
-        }''') + textwrap.dedent('''\
-        Make sure your response is a valid JSON object, all strings must
-        be surrounded by double quotes and there must be a comma between
-        the key-value pairs. The "answer" must only contain a single word
-        representing the author's ID. It is guaranteed that one of the
-        authors in the known authors list wrote the query text.
-        ''').replace('\n', ' '),
+          "analysis": Reasoning behind your answer.
+          "answer": The query text's author ID.
+        }'''),
     'user': textwrap.dedent('''\
-        Given a set of texts with known authors and
-        a query text written in Czech, determine
-        the author of the query text. Analyze the writing styles
-        of the input texts, disregarding the differences in topic and
-        content. Focus on linguistic features such as gender,
-        modal verbs, punctuation, rare words, affixes, quantities,
-        humor, sarcasm, typographical errors, and misspellings.
-        The input texts are surrounded by triple backticks.
+        Given a set of texts with known authors and a query text, determine
+        the author of the query text. Analyze the writing styles of the input
+        texts, disregarding the differences in topic and content. Focus on
+        linguistic features such as phrasal verbs, modal verbs, punctuation,
+        rare words, affixes, quantities, humor, sarcasm, typographical errors,
+        and misspellings."
         ''').replace('\n', ' ') + textwrap.dedent('''\n
-        Query text: ``` {query} ```
-
-        Texts from potential authors: ``` {examples} ```
+        The input texts are delimited with triple backticks. ```
+        
+        Query text: {query}
+        
+        Texts from potential authors: {examples}
+        
+        ```
         ''')
 }
 
 prompts_cz = {
     'system': textwrap.dedent('''\
-        Odpověz JSON objektem obsahujícím dvě položky:
+        Odpověz pouze JSON objektem obsahujícím dvě položky:
         {
         "analysis": "Zde uveď stručný důvod tvé odpovědi.",
         "answer": "ID autora dotazovaného textu."
         }''') + textwrap.dedent('''\
-        Tvá odpověď musí být pouze platný JSON objekt, všechny řetězce
+        Tvá odpověď musí být pouze platný JSON objekt, nic jiného. Všechny řetězce
         musí být ohraničeny dvojitými uvozovkami a mezi hodnotami musí
-        být čárka. "answer" musí obsahovat pouze jedno slovo reprezentující
-        ID autora. Je zaručeno, že jeden z autorů v seznamu známých autorů
-        napsal dotazovaný text. Důvod tvé odpovědi musí být v češtině a měl
-        by porovnávat jazykové rysy obou textů.
+        být čárka. "answer" musí obsahovat pouze jedno číslo reprezentující
+        ID autora. Nezapomeň správně ukončit JSON objekt složenou závorkou.
+        Je zaručeno, že jeden z autorů v seznamu známých autorů
+        napsal dotazovaný text. Důvod tvé odpovědi (analysis) musí být
+        v češtině a měl by porovnávat jazykové rysy obou textů.
         ''').replace('\n', ' '),
 
     'user': textwrap.dedent('''\
@@ -51,7 +48,8 @@ prompts_cz = {
         jsou často opakovaná slova, interpunkce, vzácná slova,
         použití speciálních znaků, přípony, kvantifikátory, humor, sarkasmus,
         typografické chyby, překlepy a pohlaví autora.
-        Použij metodu postupné racionalizace.
+        Použij metodu postupné racionalizace, kde postupně vysvětlíš, v čem
+        jsou texty podobné a v čem se liší od ostatních.
         ''').replace('\n', ' ') + textwrap.dedent('''\n
         Dotazovaný text:
         {query}
