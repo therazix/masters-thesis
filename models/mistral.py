@@ -41,15 +41,18 @@ class Mistral(LLM):
                 'content': self.template['user'].format(query=query, examples=examples)
             }
         ]
-        tokenized_messages = self.tokenizer.apply_chat_template(messages,
-                                                          return_tensors='pt',
-                                                          add_generation_prompt=True).to('cuda')
-        prompt_length = tokenized_messages.size(-1)
+        formated_messages = self.tokenizer.apply_chat_template(messages,
+                                                               tokenize=False,
+                                                               add_generation_prompt=True)
+        tokenized_messages = self.tokenizer(formated_messages, return_tensors='pt',
+                                            padding=True).to(self.model.device)
+        prompt_length = tokenized_messages['input_ids'].size(-1)
         outputs = self.model.generate(tokenized_messages,
                                       top_p=1.0,
                                       temperature=None,
-                                      max_new_tokens=self.max_new_tokens,
                                       do_sample=False,
+                                      attention_mask=tokenized_messages['attention_mask'],
+                                      max_new_tokens=self.max_new_tokens,
                                       pad_token_id=self.tokenizer.eos_token_id)
         return self.tokenizer.decode(outputs[0][prompt_length:], skip_special_tokens=True)
 

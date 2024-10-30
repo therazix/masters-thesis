@@ -31,6 +31,7 @@ class LLM:
                                                           attn_implementation='flash_attention_2',
                                                           device_map='auto')
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.tokenizer.pad_token = self.tokenizer.eos_token
         self.template = template
         self.max_tokens = self.model.config.max_position_embeddings
         self.max_new_tokens = 500
