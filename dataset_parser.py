@@ -1,15 +1,14 @@
+import json
 import logging
 import math
-import re
 from pathlib import Path
 from typing import Optional, Tuple, List
 
 import numpy as np
 import pandas as pd
 from pandarallel import pandarallel
-import json
 
-from models import LLM
+from models import BaseLLM
 from utils import get_child_logger
 
 pd.options.mode.chained_assignment = None
@@ -204,7 +203,7 @@ class DatasetParser:
             df = pd.read_csv(file)
             file_samples = pd.DataFrame(columns=['query_text', 'example_texts', 'correct_label'])
             for i in range(3):
-                samples = LLM.extract_samples(df)
+                samples = BaseLLM.extract_samples(df)
                 examples = json.dumps(
                     {row['label']: row['example_text'] for _, row in samples.iterrows()},
                     ensure_ascii=False

@@ -9,6 +9,7 @@ import click
 
 import dataset_parser
 import models.ensemble
+import models.gpt_4o
 import models.llama3
 import models.mistral
 import models.xlm_roberta
@@ -315,6 +316,43 @@ def test_llama3(ctx: click.Context, testing_set: Path, template: str, crop: bool
     llama3.test(reps)
 
 
+@click.command(name='gpt4o')
+@click.option('--testing-set',
+              required=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              help='Testing set for the model.')
+@click.option('--template',
+              required=True,
+              type=str,
+              help="What prompt template to use for the model's instructions. "
+                   "Either 'en', 'cz' or 'cz-1shot'.")
+@click.option('--crop',
+              required=False,
+              is_flag=True,
+              help='Crop all texts from dataset to fit the model input size. '
+                   'If not provided, texts that are too long will be skipped.')
+@click.option('--reps',
+              required=False,
+              type=int,
+              default=3,
+              show_default=True,
+              help='Number of repetitions for testing.')
+@click.option('--openai-api-key',
+              required=False,
+              type=str,
+              help='OpenAI API key. If not provided, OPENAI_API_KEY environment '
+                   'variable will be used.')
+@click.pass_context
+def test_gpt4o(ctx: click.Context, testing_set: Path,
+                template: str, crop: bool, reps: int, openai_api_key: Optional[str] = None):
+    logger = ctx.obj['logger']
+    if reps < 1:
+        raise ValueError('Number of repetitions must be at least 1')
+    gpt4o = models.gpt_4o.GPT4o(testing_set, template, crop, openai_api_key, logger)
+    gpt4o.test(reps)
+
+
 @click.group()
 def test():
     pass
@@ -324,6 +362,7 @@ test.add_command(test_xlm_roberta)
 test.add_command(test_ensemble)
 test.add_command(test_mistral)
 test.add_command(test_llama3)
+test.add_command(test_gpt4o)
 
 
 ### Other commands ###

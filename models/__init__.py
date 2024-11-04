@@ -3,7 +3,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 
 import numpy as np
 import pandas as pd
@@ -18,26 +18,20 @@ from metrics import compute_metrics
 from utils import get_child_logger
 
 
-class LLM:
+class BaseLLM:
     def __init__(self,
-                 model_name: str,
                  dataset_path: Path,
-                 crop: bool,
                  template: str,
-                 hf_token: Optional[str] = None,
+                 crop: bool,
+                 min_tokens_per_text: int,
+                 max_tokens: int,
+                 max_new_tokens: int,
                  logger: Optional[logging.Logger] = None):
         self.logger = logger or get_child_logger(__name__)
-        self._login(hf_token)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name,
-                                                          torch_dtype=torch.float16,
-                                                          attn_implementation='flash_attention_2',
-                                                          device_map='auto')
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.tokenizer.pad_token = self.tokenizer.eos_token
         self.template = self._load_template(template)
-        self.max_tokens = self.model.config.max_position_embeddings
-        self.max_new_tokens = 800
-        self.min_tokens_per_text = 56
+        self.max_tokens = max_tokens
+        self.max_new_tokens = max_new_tokens
+        self.min_tokens_per_text = min_tokens_per_text
         df = self._read_dataset(dataset_path)
         num_of_authors = len(df['label'].unique())
         self.max_tokens_per_text = self._get_max_tokens_per_text(num_of_authors)
@@ -72,12 +66,11 @@ class LLM:
                              'consider cropping them using `--crop` flag.')
         return result
 
-    def _count_tokens(self, text: str) -> int:
-        encoding = self.tokenizer(text)
-        return len(encoding.input_ids)
+    def count_tokens(self, text: str) -> int:
+        raise NotImplementedError
 
     def _is_token_count_valid(self, text: str) -> bool:
-        count = self._count_tokens(text)
+        count = self.count_tokens(text)
         return self.min_tokens_per_text < count < self.max_tokens_per_text
 
     def _crop_if_needed(self, text: str) -> str:
@@ -87,27 +80,18 @@ class LLM:
         sentences = re.split(r'(?<=[.!?]) +', text)
         cropped_text = ''
         for sentence in sentences:
-            if self._count_tokens(cropped_text + sentence) > self.max_tokens_per_text:
+            if self.count_tokens(cropped_text + sentence) > self.max_tokens_per_text:
                 break
             cropped_text += sentence + ' '
         return cropped_text.strip()
 
     def _get_max_tokens_per_text(self, num_of_examples: int) -> int:
         buffer = 50
-        template_len = self._count_tokens(str(self.template))
+        template_len = self.count_tokens(str(self.template))
         rest = self.max_tokens - self.max_new_tokens - template_len - buffer
         if num_of_examples > 0:
             return rest // num_of_examples
         return rest
-
-    @staticmethod
-    def _login(hf_token: Optional[str] = None):
-        load_dotenv()
-        token = hf_token or os.getenv('HF_TOKEN')
-        if not token:
-            raise ValueError('Hugging Face API token is missing. Please set HF_TOKEN '
-                             'environment variable or pass it as an argument.')
-        login(token=token)
 
     @staticmethod
     def extract_samples(df: pd.DataFrame) -> pd.DataFrame:
@@ -126,7 +110,12 @@ class LLM:
         return result
 
     @staticmethod
-    def evaluate(results: List[pd.DataFrame]):
+    def _read_dataset(dataset: Path) -> pd.DataFrame:
+        df = pd.read_csv(dataset)
+        return df[['label', 'text']]
+
+    @staticmethod
+    def evaluate(results: List[pd.DataFrame]) -> Tuple[Dict[str, float], Dict[str, float]]:
         acc_list, f1_list, precision_list, recall_list = [], [], [], []
         for rep_result_df in results:
             rep_result_metrics = compute_metrics(rep_result_df['label'], rep_result_df['answer'])
@@ -134,11 +123,57 @@ class LLM:
             f1_list.append(rep_result_metrics['f1'])
             precision_list.append(rep_result_metrics['precision'])
             recall_list.append(rep_result_metrics['recall'])
-        avg = (np.mean(acc_list), np.mean(f1_list), np.mean(precision_list), np.mean(recall_list))
-        std = (np.std(acc_list), np.std(f1_list), np.std(precision_list), np.std(recall_list))
+        avg = {
+            'accuracy': np.mean(acc_list),
+            'f1': np.mean(f1_list),
+            'precision': np.mean(precision_list),
+            'recall': np.mean(recall_list)
+        }
+        std = {
+            'accuracy': np.std(acc_list),
+            'f1': np.std(f1_list),
+            'precision': np.std(precision_list),
+            'recall': np.std(recall_list)
+        }
         return avg, std
 
+
+
+class HuggingFaceLLM(BaseLLM):
+    def __init__(self,
+                 model_name: str,
+                 dataset_path: Path,
+                 crop: bool,
+                 template: str,
+                 hf_token: Optional[str] = None,
+                 logger: Optional[logging.Logger] = None):
+        self._login(hf_token)
+        self.model = AutoModelForCausalLM.from_pretrained(model_name,
+                                                          torch_dtype=torch.float16,
+                                                          attn_implementation='flash_attention_2',
+                                                          device_map='auto')
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.tokenizer.pad_token = self.tokenizer.eos_token
+        super().__init__(
+            dataset_path=dataset_path,
+            template=template,
+            crop=crop,
+            min_tokens_per_text=56,
+            max_tokens=self.model.config.max_position_embeddings,
+            max_new_tokens=800,
+            logger=logger or get_child_logger(__name__)
+        )
+
     @staticmethod
-    def _read_dataset(dataset: Path) -> pd.DataFrame:
-        df = pd.read_csv(dataset)
-        return df[['label', 'text']]
+    def _login(hf_token: Optional[str] = None):
+        load_dotenv()
+        token = hf_token or os.getenv('HF_TOKEN')
+        if not token:
+            raise ValueError('Hugging Face API token is missing. Please set HF_TOKEN '
+                             'environment variable or pass it as an argument.')
+        login(token=token)
+
+    def count_tokens(self, text: str) -> int:
+        encoding = self.tokenizer(text)
+        return len(encoding.input_ids)
+

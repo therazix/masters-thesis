@@ -7,10 +7,10 @@ from typing import Optional
 import pandas as pd
 
 from utils import get_child_logger
-from . import LLM
+from . import HuggingFaceLLM
 
 
-class Mistral(LLM):
+class Mistral(HuggingFaceLLM):
     def __init__(self,
                  dataset_path: Path,
                  template: str,
