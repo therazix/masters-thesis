@@ -7,7 +7,9 @@ from typing import Optional, Tuple, List
 import numpy as np
 import pandas as pd
 from pandarallel import pandarallel
+import json
 
+from models import LLM
 from utils import get_child_logger
 
 pd.options.mode.chained_assignment = None
@@ -189,3 +191,30 @@ class DatasetParser:
         val.to_csv(self.output_dir / f'val_top{num_of_authors}{ooc_suffix}.csv', index=False)
         test.to_csv(self.output_dir / f'test_top{num_of_authors}{ooc_suffix}.csv', index=False)
         self.logger.info(f"Dataset created and saved to '{self.output_dir}'")
+
+    @classmethod
+    def create_finetuning(cls, input_files: List[Path], logger: Optional[logging.Logger] = None):
+        output_dir = Path('datasets/finetuning/')
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logger = get_child_logger(__name__, logger)
+
+        combined_df = pd.DataFrame(columns=['query_text', 'example_texts', 'correct_label'])
+        for file in input_files:
+            logger.debug(f"Reading input file '{file}'")
+            df = pd.read_csv(file)
+            file_samples = pd.DataFrame(columns=['query_text', 'example_texts', 'correct_label'])
+            for i in range(3):
+                samples = LLM.extract_samples(df)
+                examples = json.dumps(
+                    {row['label']: row['example_text'] for _, row in samples.iterrows()},
+                    ensure_ascii=False
+                )
+                for _, row in samples.iterrows():
+                    file_samples = pd.concat([pd.DataFrame(
+                        [[row['query_text'], examples, row['label']]], columns=file_samples.columns
+                    ), file_samples], ignore_index=True)
+
+            combined_df = pd.concat([combined_df, file_samples], ignore_index=True)
+        combined_df = combined_df.sample(frac=1).reset_index(drop=True)
+        combined_df.to_csv(output_dir / 'finetuning.csv', index=False)
+

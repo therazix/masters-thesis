@@ -1,3 +1,4 @@
+import copy
 import logging
 import os
 import re
@@ -12,6 +13,7 @@ from huggingface_hub import login
 from transformers import AutoModelForCausalLM, \
     AutoTokenizer
 
+import prompts
 from metrics import compute_metrics
 from utils import get_child_logger
 
@@ -21,7 +23,7 @@ class LLM:
                  model_name: str,
                  dataset_path: Path,
                  crop: bool,
-                 template: Dict[str, str],
+                 template: str,
                  hf_token: Optional[str] = None,
                  logger: Optional[logging.Logger] = None):
         self.logger = logger or get_child_logger(__name__)
@@ -32,15 +34,29 @@ class LLM:
                                                           device_map='auto')
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.template = template
+        self.template = self._load_template(template)
         self.max_tokens = self.model.config.max_position_embeddings
-        self.max_new_tokens = 500
+        self.max_new_tokens = 800
         self.min_tokens_per_text = 56
         df = self._read_dataset(dataset_path)
         num_of_authors = len(df['label'].unique())
-        self.max_tokens_per_text = self._get_max_tokens_per_text(self.template, num_of_authors)
+        self.max_tokens_per_text = self._get_max_tokens_per_text(num_of_authors)
         self.dataset = self._parse_dataset(df, crop)
 
+    @staticmethod
+    def _load_template(template: str) -> List[Dict[str, str]]:
+        if template.lower() == 'en':
+            return prompts.prompts_en
+        if template.lower() == 'cz':
+            return prompts.prompts_cz
+        if template.lower() == 'cz-1shot':
+            return prompts.prompts_cz_1shot
+        raise ValueError('Invalid template. Available templates are: en, cz, cz-1shot')
+
+    def format_prompts(self, query: str, examples: str):
+        messages = copy.deepcopy(self.template)
+        messages[-1]['content'] = messages[-1]['content'].format(query=query, examples=examples)
+        return messages
 
     def _parse_dataset(self, df: pd.DataFrame, crop: bool = False) -> pd.DataFrame:
         if crop:
@@ -76,9 +92,9 @@ class LLM:
             cropped_text += sentence + ' '
         return cropped_text.strip()
 
-    def _get_max_tokens_per_text(self, template: Dict[str, str], num_of_examples: int) -> int:
+    def _get_max_tokens_per_text(self, num_of_examples: int) -> int:
         buffer = 50
-        template_len = self._count_tokens(str(template))
+        template_len = self._count_tokens(str(self.template))
         rest = self.max_tokens - self.max_new_tokens - template_len - buffer
         if num_of_examples > 0:
             return rest // num_of_examples
@@ -99,7 +115,10 @@ class LLM:
         result = pd.DataFrame(columns=['label', 'query_text', 'example_text'])
         for author in author_names:
             # Get 2 random texts from author
-            text_1, text_2 = df[df['label'] == author]['text'].sample(2)
+            try:
+                text_1, text_2 = df[df['label'] == author]['text'].sample(2)
+            except ValueError as err:
+                raise ValueError(f'Not enough samples for author {author}.') from err
             author_df = pd.DataFrame([[author, text_1, text_2]], columns=result.columns)
             result = pd.concat([result, author_df], ignore_index=True)
         result = result.sort_values(by=['label'])

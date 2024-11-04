@@ -20,7 +20,13 @@ TEMP_DIR = Path(tempfile.gettempdir()) / 'DP_541699'
 
 
 def to_path(ctx, param, value):
-    return Path(value) if value else None
+    if value is None:
+        return None
+    if isinstance(value, tuple):
+        return tuple(Path(v) for v in value)
+    if isinstance(value, list):
+        return [Path(v) for v in value]
+    return Path(value)
 
 
 ### Scraping commands ###
@@ -243,11 +249,11 @@ def test_ensemble(ctx: click.Context, model: Path, classifiers_dir: Path, testin
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
               callback=to_path,
               help='Testing set for the model.')
-@click.option('--lang',
-              required=False,
+@click.option('--template',
+              required=True,
               type=str,
-              default='cz',
-              help="What language to use for the model's instructions. Either 'cz' or 'en'.")
+              help="What prompt template to use for the model's instructions. "
+                   "Either 'en', 'cz' or 'cz-1shot'.")
 @click.option('--crop',
               required=False,
               is_flag=True,
@@ -265,11 +271,11 @@ def test_ensemble(ctx: click.Context, model: Path, classifiers_dir: Path, testin
               help='Hugging Face API token. If not provided, HF_TOKEN environment '
                    'variable will be used.')
 @click.pass_context
-def test_mistral(ctx: click.Context, testing_set: Path, lang: str, crop: bool, reps: int, token: Optional[str] = None):
+def test_mistral(ctx: click.Context, testing_set: Path, template: str, crop: bool, reps: int, token: Optional[str] = None):
     logger = ctx.obj['logger']
     if reps < 1:
         raise ValueError('Number of repetitions must be at least 1')
-    mistral = models.mistral.Mistral(testing_set, lang, crop, token, logger)
+    mistral = models.mistral.Mistral(testing_set, template, crop, token, logger)
     mistral.test(reps)
 
 
@@ -279,11 +285,11 @@ def test_mistral(ctx: click.Context, testing_set: Path, lang: str, crop: bool, r
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
               callback=to_path,
               help='Testing set for the model.')
-@click.option('--lang',
-              required=False,
+@click.option('--template',
+              required=True,
               type=str,
-              default='cz',
-              help="What language to use for the model's instructions. Either 'cz' or 'en'.")
+              help="What prompt template to use for the model's instructions. "
+                   "Either 'en', 'cz' or 'cz-1shot'.")
 @click.option('--crop',
               required=False,
               is_flag=True,
@@ -301,11 +307,11 @@ def test_mistral(ctx: click.Context, testing_set: Path, lang: str, crop: bool, r
               help='Hugging Face API token. If not provided, HF_TOKEN environment '
                    'variable will be used.')
 @click.pass_context
-def test_llama3(ctx: click.Context, testing_set: Path, lang: str, crop: bool, reps: int, token: Optional[str] = None):
+def test_llama3(ctx: click.Context, testing_set: Path, template: str, crop: bool, reps: int, token: Optional[str] = None):
     logger = ctx.obj['logger']
     if reps < 1:
         raise ValueError('Number of repetitions must be at least 1')
-    llama3 = models.llama3.Llama3(testing_set, lang, crop, token, logger)
+    llama3 = models.llama3.Llama3(testing_set, template, crop, token, logger)
     llama3.test(reps)
 
 
@@ -380,12 +386,29 @@ def dataset_info(ctx: click.Context, input_file: Path, top: List[int]):
     parser.info(top)
 
 
+@click.command(name='create-finetuning')
+@click.option('-i', '--input-file',
+              multiple=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              default=[],
+              help='Path to the dataset.')
+@click.pass_context
+def dataset_create_finetuning(ctx: click.Context, input_file: List[Path]):
+    logger = ctx.obj['logger']
+    input_files = list(set([i.resolve() for i in input_file if i]))
+    if not input_files:
+        raise ValueError('At least one input file must be provided.')
+    dataset_parser.DatasetParser.create_finetuning(input_files, logger)
+
+
 @click.group()
 def dataset():
     pass
 
 dataset.add_command(dataset_create)
 dataset.add_command(dataset_info)
+dataset.add_command(dataset_create_finetuning)
 
 
 @click.group()

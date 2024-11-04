@@ -6,7 +6,6 @@ from typing import Optional
 
 import pandas as pd
 
-import prompts
 from utils import get_child_logger
 from . import LLM
 
@@ -14,44 +13,33 @@ from . import LLM
 class Mistral(LLM):
     def __init__(self,
                  dataset_path: Path,
-                 lang: str,
+                 template: str,
                  crop: bool,
                  hf_token: Optional[str] = None,
                  logger: Optional[logging.Logger] = None):
-        if lang.lower() not in ['en', 'cz']:
-            raise ValueError("Language must be either 'en' or 'cz'")
-
         super().__init__(
             model_name='mistralai/Mistral-7B-Instruct-v0.3',
             dataset_path=dataset_path,
             crop=crop,
-            template=prompts.prompts_en if lang == 'en' else prompts.prompts_cz,
+            template=template,
             hf_token=hf_token,
             logger=get_child_logger(__name__, logger))
 
-
     def _generate(self, query: str, examples: str):
-        messages = [
-            {
-                'role': 'system',
-                'content': self.template['system']
-            },
-            {
-                'role': 'user',
-                'content': self.template['user'].format(query=query, examples=examples)
-            }
-        ]
+        messages = self.format_prompts(query, examples)
         formated_messages = self.tokenizer.apply_chat_template(messages,
                                                                tokenize=False,
                                                                add_generation_prompt=True)
         tokenized_messages = self.tokenizer(formated_messages, return_tensors='pt',
                                             padding=True).to(self.model.device)
-        prompt_length = tokenized_messages['input_ids'].size(-1)
-        outputs = self.model.generate(tokenized_messages,
+        input_ids = tokenized_messages['input_ids']
+        attention_mask = tokenized_messages['attention_mask']
+        prompt_length = input_ids.size(-1)
+        outputs = self.model.generate(input_ids,
                                       top_p=1.0,
                                       temperature=None,
                                       do_sample=False,
-                                      attention_mask=tokenized_messages['attention_mask'],
+                                      attention_mask=attention_mask,
                                       max_new_tokens=self.max_new_tokens,
                                       pad_token_id=self.tokenizer.eos_token_id)
         return self.tokenizer.decode(outputs[0][prompt_length:], skip_special_tokens=True)

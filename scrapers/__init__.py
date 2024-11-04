@@ -25,7 +25,7 @@ class Scraper:
 
     @classmethod
     def _parse_author_text(cls, text: str, check_language=True) -> Optional[str]:
-        text = text.strip()  # Remove leading and trailing whitespaces
+        text = utils.clean_text(text)
         if not text or text.isspace():
             return None
         if len(text) < MIN_AUTHOR_TEXT_LENGTH:
