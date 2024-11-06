@@ -20,19 +20,18 @@ class GPTResponse(BaseModel):
 
 class GPT4o(BaseLLM):
     def __init__(self,
+                 output_dir: Path,
                  dataset_path: Path,
                  template: str,
-                 crop: bool,
                  openai_api_key: Optional[str] = None,
                  logger: Optional[logging.Logger] = None):
         self.client = self._get_client(openai_api_key)
         self.model_name = 'gpt-4o-2024-08-06'
         self.model_name_for_encoding = 'gpt-4o'
         super().__init__(
+            output_dir=output_dir,
             dataset_path=dataset_path,
             template=template,
-            crop=crop,
-            min_tokens_per_text=56,
             max_tokens=128000,
             max_new_tokens=800,
             logger=get_child_logger(__name__, logger)
@@ -80,27 +79,27 @@ class GPT4o(BaseLLM):
             return {'analysis': response, 'answer': 'error'}
         return {'analysis': response.analysis, 'answer': response.answer}
 
-    def test(self, reps: int):
+    def test(self):
         result = []
-        for _ in range(reps):
-            responses = []
-            samples = self.extract_samples(self.dataset)
-
+        for rep, rep_data in self.dataset.groupby(level=0):
             examples = json.dumps(
-                {row['label']: row['example_text'] for _, row in samples.iterrows()},
+                {row['label']: row['example_text'] for _, row in rep_data.iterrows()},
                 ensure_ascii=False
             )
-
-            for _, row in samples.iterrows():
+            data = rep_data.sample(self.num_of_authors)
+            responses = []
+            for _, row in data.iterrows():
                 gpt_response = self._generate(row['query_text'], examples)
                 response = self._parse_response(gpt_response)
                 response['label'] = str(row['label'])
+                response['rep'] = str(rep)
                 responses.append(response)
                 self.logger.info(str(response))
             responses_df = pd.DataFrame(responses)
             responses_df[['label', 'answer']] = responses_df[['label', 'answer']].astype(str)
             result.append(responses_df)
 
+        self.save_results('gpt4o', result)
         avg, std = self.evaluate(result)
         self.logger.info(f'Average: {avg}')
         self.logger.info(f'Standard deviation: {std}')

@@ -1,11 +1,12 @@
-import re
-import strip_markdown
-import logging
-from typing import Optional
-from pathlib import Path
-import pandas as pd
-import time
 import json
+import logging
+import re
+import time
+from pathlib import Path
+from typing import Optional
+
+import pandas as pd
+import strip_markdown
 
 MIN_AUTHOR_TEXT_LENGTH = 8
 LOGGER = logging.getLogger(__name__)

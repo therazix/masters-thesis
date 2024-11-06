@@ -245,6 +245,11 @@ def test_ensemble(ctx: click.Context, model: Path, classifiers_dir: Path, testin
 
 
 @click.command(name='mistral')
+@click.option('-o', '--output-dir',
+              required=True,
+              type=click.Path(file_okay=False, dir_okay=True, readable=True),
+              callback=to_path,
+              help='Directory for outputs during testing.')
 @click.option('--testing-set',
               required=True,
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
@@ -255,32 +260,25 @@ def test_ensemble(ctx: click.Context, model: Path, classifiers_dir: Path, testin
               type=str,
               help="What prompt template to use for the model's instructions. "
                    "Either 'en', 'cz' or 'cz-1shot'.")
-@click.option('--crop',
-              required=False,
-              is_flag=True,
-              help='Crop all texts from dataset to fit the model input size. '
-                   'If not provided, texts that are too long will be skipped.')
-@click.option('--reps',
-              required=False,
-              type=int,
-              default=3,
-              show_default=True,
-              help='Number of repetitions for testing.')
 @click.option('--token',
               required=False,
               type=str,
               help='Hugging Face API token. If not provided, HF_TOKEN environment '
                    'variable will be used.')
 @click.pass_context
-def test_mistral(ctx: click.Context, testing_set: Path, template: str, crop: bool, reps: int, token: Optional[str] = None):
+def test_mistral(ctx: click.Context, output_dir: Path, testing_set: Path, template: str,
+                 token: Optional[str] = None):
     logger = ctx.obj['logger']
-    if reps < 1:
-        raise ValueError('Number of repetitions must be at least 1')
-    mistral = models.mistral.Mistral(testing_set, template, crop, token, logger)
-    mistral.test(reps)
+    mistral = models.mistral.Mistral(output_dir, testing_set, template, token, logger)
+    mistral.test()
 
 
 @click.command(name='llama3')
+@click.option('-o', '--output-dir',
+              required=True,
+              type=click.Path(file_okay=False, dir_okay=True, readable=True),
+              callback=to_path,
+              help='Directory for outputs during testing.')
 @click.option('--testing-set',
               required=True,
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
@@ -291,32 +289,25 @@ def test_mistral(ctx: click.Context, testing_set: Path, template: str, crop: boo
               type=str,
               help="What prompt template to use for the model's instructions. "
                    "Either 'en', 'cz' or 'cz-1shot'.")
-@click.option('--crop',
-              required=False,
-              is_flag=True,
-              help='Crop all texts from dataset to fit the model input size. '
-                   'If not provided, texts that are too long will be skipped.')
-@click.option('--reps',
-              required=False,
-              type=int,
-              default=3,
-              show_default=True,
-              help='Number of repetitions for testing.')
 @click.option('--token',
               required=False,
               type=str,
               help='Hugging Face API token. If not provided, HF_TOKEN environment '
                    'variable will be used.')
 @click.pass_context
-def test_llama3(ctx: click.Context, testing_set: Path, template: str, crop: bool, reps: int, token: Optional[str] = None):
+def test_llama3(ctx: click.Context, output_dir: Path, testing_set: Path, template: str,
+                token: Optional[str] = None):
     logger = ctx.obj['logger']
-    if reps < 1:
-        raise ValueError('Number of repetitions must be at least 1')
-    llama3 = models.llama3.Llama3(testing_set, template, crop, token, logger)
-    llama3.test(reps)
+    llama3 = models.llama3.Llama3(output_dir, testing_set, template, token, logger)
+    llama3.test()
 
 
 @click.command(name='gpt4o')
+@click.option('-o', '--output-dir',
+              required=True,
+              type=click.Path(file_okay=False, dir_okay=True, readable=True),
+              callback=to_path,
+              help='Directory for outputs during testing.')
 @click.option('--testing-set',
               required=True,
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
@@ -327,30 +318,17 @@ def test_llama3(ctx: click.Context, testing_set: Path, template: str, crop: bool
               type=str,
               help="What prompt template to use for the model's instructions. "
                    "Either 'en', 'cz' or 'cz-1shot'.")
-@click.option('--crop',
-              required=False,
-              is_flag=True,
-              help='Crop all texts from dataset to fit the model input size. '
-                   'If not provided, texts that are too long will be skipped.')
-@click.option('--reps',
-              required=False,
-              type=int,
-              default=3,
-              show_default=True,
-              help='Number of repetitions for testing.')
 @click.option('--openai-api-key',
               required=False,
               type=str,
               help='OpenAI API key. If not provided, OPENAI_API_KEY environment '
                    'variable will be used.')
 @click.pass_context
-def test_gpt4o(ctx: click.Context, testing_set: Path,
-                template: str, crop: bool, reps: int, openai_api_key: Optional[str] = None):
+def test_gpt4o(ctx: click.Context, output_dir: Path, testing_set: Path, template: str,
+               openai_api_key: Optional[str] = None):
     logger = ctx.obj['logger']
-    if reps < 1:
-        raise ValueError('Number of repetitions must be at least 1')
-    gpt4o = models.gpt_4o.GPT4o(testing_set, template, crop, openai_api_key, logger)
-    gpt4o.test(reps)
+    gpt4o = models.gpt_4o.GPT4o(output_dir, testing_set, template, openai_api_key, logger)
+    gpt4o.test()
 
 
 @click.group()
@@ -441,6 +419,33 @@ def dataset_create_finetuning(ctx: click.Context, input_file: List[Path]):
     dataset_parser.DatasetParser.create_finetuning(input_files, logger)
 
 
+@click.command(name='create-prompting')
+@click.option('-i', '--input-file',
+              required=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              help='Input file with scraped data.')
+@click.option('-o', '--output-dir',
+              required=False,
+              type=click.Path(file_okay=False, dir_okay=True, writable=True),
+              callback=to_path,
+              help='Output directory for processed dataset.')
+@click.option('-n', '--num-of-authors',
+              required=True,
+              type=int,
+              help='Number of authors to extract. Authors with the most texts are selected.')
+@click.option('-r', '--reps',
+                default=3,
+                type=int,
+                help='Number of repetitions for each author.')
+@click.pass_context
+def dataset_create_prompting(ctx: click.Context, input_file: Path, output_dir: Optional[Path],
+                   num_of_authors: int, reps: int):
+    logger = ctx.obj['logger']
+    output_dir = output_dir or Path('datasets')
+    parser = dataset_parser.DatasetParser(input_file, logger)
+    parser.create_prompting(output_dir, num_of_authors, reps)
+
 @click.group()
 def dataset():
     pass
@@ -448,6 +453,7 @@ def dataset():
 dataset.add_command(dataset_create)
 dataset.add_command(dataset_info)
 dataset.add_command(dataset_create_finetuning)
+dataset.add_command(dataset_create_prompting)
 
 
 @click.group()

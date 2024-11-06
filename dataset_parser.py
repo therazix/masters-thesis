@@ -1,15 +1,17 @@
 import json
 import logging
 import math
+import random
 from pathlib import Path
 from typing import Optional, Tuple, List
 
 import numpy as np
 import pandas as pd
+import tiktoken
 from pandarallel import pandarallel
 
 from models import BaseLLM
-from utils import get_child_logger
+from utils import clean_text, get_child_logger
 
 pd.options.mode.chained_assignment = None
 
@@ -44,7 +46,7 @@ def _extract_style(text: str):
 def _insert_features(df: pd.DataFrame):
     columns = ['avg_len', 'len_text', 'len_words', 'num_short_w', 'per_digit', 'per_cap', 'richness']
     columns += [f'cf_{c}' for c in CHARS + DIGITS + DIACRITICS]
-    df[columns] = df['text'].parallel_apply( lambda x: _extract_style(x))
+    df[columns] = df['text'].parallel_apply(lambda x: _extract_style(x))
 
 
 class DatasetParser:
@@ -125,6 +127,8 @@ class DatasetParser:
         val = pd.DataFrame(columns=['label', 'text'])
         test = pd.DataFrame(columns=['label', 'text'])
 
+        self.df['text'] = self.df['text'].parallel_apply(lambda x: clean_text(x))
+
         for author in selected_authors:
             author_df = self.df[self.df['label'] == author]  # Get all texts of the author
             if limit is not None:
@@ -191,6 +195,43 @@ class DatasetParser:
         test.to_csv(self.output_dir / f'test_top{num_of_authors}{ooc_suffix}.csv', index=False)
         self.logger.info(f"Dataset created and saved to '{self.output_dir}'")
 
+    def create_prompting(self, output_dir: Path, num_of_authors: int, reps: int = 3):
+        if reps < 1:
+            raise ValueError('Number of repetitions must be at least 1')
+        if num_of_authors < 2:
+            raise ValueError('Number of authors must be at least 2')
+
+        self.logger.debug('Creating dataset for prompting...')
+
+        self.output_dir = output_dir.resolve()
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        _init_pandarallel()
+
+        self.df['text'] = self.df['text'].parallel_apply(lambda x: clean_text(x))
+
+        # Filter out texts that are too short
+        df = self.df[self.df['text'].parallel_apply(lambda x: _has_minimum_length(x))]
+
+        columns = ['label', 'query_text', 'example_text']
+        results = []
+        for _ in range(reps):
+            authors = random.sample(self.authors, num_of_authors)
+            authors_texts = []
+            for i, author in enumerate(authors):
+                try:
+                    text_1, text_2 = df[df['label'] == author]['text'].sample(2)
+                except ValueError as err:
+                    raise ValueError(f'Not enough samples for author {author}.') from err
+                authors_texts.append([i, text_1, text_2])
+            results.append(pd.DataFrame(authors_texts, columns=columns))
+        results_df = pd.concat(results, keys={i: res for i, res in enumerate(results)})
+        results_df = results_df.reset_index(level=1, drop=True)
+
+        filename = f'test_prompts_{num_of_authors}authors_{reps}reps.csv'
+        results_df.to_csv(self.output_dir / filename, index=True)
+        self.logger.info(f"Dataset created and saved to '{self.output_dir}'")
+
     @classmethod
     def create_finetuning(cls, input_files: List[Path], logger: Optional[logging.Logger] = None):
         output_dir = Path('datasets/finetuning/')
@@ -216,4 +257,10 @@ class DatasetParser:
             combined_df = pd.concat([combined_df, file_samples], ignore_index=True)
         combined_df = combined_df.sample(frac=1).reset_index(drop=True)
         combined_df.to_csv(output_dir / 'finetuning.csv', index=False)
+
+
+def _has_minimum_length(text: str) -> bool:
+    encoding = tiktoken.encoding_for_model('gpt-4o')
+    count = len(encoding.encode(text))
+    return count > 60
 

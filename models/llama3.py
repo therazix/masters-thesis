@@ -12,15 +12,15 @@ from . import HuggingFaceLLM
 
 class Llama3(HuggingFaceLLM):
     def __init__(self,
+                 output_dir: Path,
                  dataset_path: Path,
                  template: str,
-                 crop: bool,
                  hf_token: Optional[str] = None,
                  logger: Optional[logging.Logger] = None):
         super().__init__(
+            output_dir=output_dir,
             model_name='meta-llama/Llama-3.1-8B-Instruct',
             dataset_path=dataset_path,
-            crop=crop,
             template=template,
             hf_token=hf_token,
             logger=get_child_logger(__name__, logger))
@@ -61,27 +61,27 @@ class Llama3(HuggingFaceLLM):
                 self.logger.error(f'Failed to parse response: {text}')
         return response
 
-    def test(self, reps: int):
+    def test(self):
         result = []
-        for _ in range(reps):
-            responses = []
-            samples = self.extract_samples(self.dataset)
-
+        for rep, rep_data in self.dataset.groupby(level=0):
             examples = json.dumps(
-                {row['label']: row['example_text'] for _, row in samples.iterrows()},
+                {row['label']: row['example_text'] for _, row in rep_data.iterrows()},
                 ensure_ascii=False
             )
-
-            for _, row in samples.iterrows():
+            data = rep_data.sample(self.num_of_authors)
+            responses = []
+            for _, row in data.iterrows():
                 response_str = self._generate(row['query_text'], examples)
                 response = self._parse_response(response_str)
                 response['label'] = str(row['label'])
+                response['rep'] = str(rep)
                 responses.append(response)
                 self.logger.info(str(response))
             responses_df = pd.DataFrame(responses)
             responses_df[['label', 'answer']] = responses_df[['label', 'answer']].astype(str)
             result.append(responses_df)
 
+        self.save_results('llama3', result)
         avg, std = self.evaluate(result)
         self.logger.info(f'Average: {avg}')
         self.logger.info(f'Standard deviation: {std}')

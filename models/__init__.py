@@ -20,22 +20,23 @@ from utils import get_child_logger
 
 class BaseLLM:
     def __init__(self,
+                 output_dir: Path,
                  dataset_path: Path,
                  template: str,
-                 crop: bool,
-                 min_tokens_per_text: int,
                  max_tokens: int,
                  max_new_tokens: int,
                  logger: Optional[logging.Logger] = None):
         self.logger = logger or get_child_logger(__name__)
+        self.output_dir = output_dir.resolve()
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         self.template = self._load_template(template)
+        self.template_name = template
         self.max_tokens = max_tokens
         self.max_new_tokens = max_new_tokens
-        self.min_tokens_per_text = min_tokens_per_text
-        df = self._read_dataset(dataset_path)
-        num_of_authors = len(df['label'].unique())
+        df, num_of_authors = self._read_dataset(dataset_path)
+        self.num_of_authors = num_of_authors
         self.max_tokens_per_text = self._get_max_tokens_per_text(num_of_authors)
-        self.dataset = self._parse_dataset(df, crop)
+        self.dataset = self._parse_dataset(df)
 
     @staticmethod
     def _load_template(template: str) -> List[Dict[str, str]]:
@@ -52,26 +53,16 @@ class BaseLLM:
         messages[-1]['content'] = messages[-1]['content'].format(query=query, examples=examples)
         return messages
 
-    def _parse_dataset(self, df: pd.DataFrame, crop: bool = False) -> pd.DataFrame:
-        if crop:
-            result = df[df['text'].apply(lambda x: self._crop_if_needed(x))]
-        else:
-            result = df[df['text'].apply(lambda x: self._is_token_count_valid(x))]
-
-        min_texts_per_author = 5
-        if result.groupby('label').size().min() < min_texts_per_author:
-            raise ValueError('Not enough samples per author after dataset parsing. Dataset must '
-                             f'have at least {min_texts_per_author} samples per author and each '
-                             'text must be within model token limits. If texts are too long, '
-                             'consider cropping them using `--crop` flag.')
-        return result
+    def _parse_dataset(self, df: pd.DataFrame) -> pd.DataFrame:
+        df['query_text'] = df['query_text'].apply(lambda x: self._crop_if_needed(x))
+        df['example_text'] = df['example_text'].apply(lambda x: self._crop_if_needed(x))
+        return df
 
     def count_tokens(self, text: str) -> int:
         raise NotImplementedError
 
     def _is_token_count_valid(self, text: str) -> bool:
-        count = self.count_tokens(text)
-        return self.min_tokens_per_text < count < self.max_tokens_per_text
+        return self.count_tokens(text) < self.max_tokens_per_text
 
     def _crop_if_needed(self, text: str) -> str:
         if self._is_token_count_valid(text):
@@ -83,14 +74,15 @@ class BaseLLM:
             if self.count_tokens(cropped_text + sentence) > self.max_tokens_per_text:
                 break
             cropped_text += sentence + ' '
+        self.logger.warning(f"Text was cropped to fit the token limit: '{text}'")
         return cropped_text.strip()
 
-    def _get_max_tokens_per_text(self, num_of_examples: int) -> int:
+    def _get_max_tokens_per_text(self, num_of_texts: int) -> int:
         buffer = 50
         template_len = self.count_tokens(str(self.template))
         rest = self.max_tokens - self.max_new_tokens - template_len - buffer
-        if num_of_examples > 0:
-            return rest // num_of_examples
+        if num_of_texts > 0:
+            return rest // (num_of_texts + 1)  # +1 for the query text
         return rest
 
     @staticmethod
@@ -110,9 +102,10 @@ class BaseLLM:
         return result
 
     @staticmethod
-    def _read_dataset(dataset: Path) -> pd.DataFrame:
-        df = pd.read_csv(dataset)
-        return df[['label', 'text']]
+    def _read_dataset(dataset: Path) -> Tuple[pd.DataFrame, int]:
+        df = pd.read_csv(dataset, index_col=0)
+        num_of_authors = df['label'].groupby(level=0).nunique().unique()[0]
+        return df, num_of_authors
 
     @staticmethod
     def evaluate(results: List[pd.DataFrame]) -> Tuple[Dict[str, float], Dict[str, float]]:
@@ -137,13 +130,18 @@ class BaseLLM:
         }
         return avg, std
 
+    def save_results(self, model_name: str, results: List[pd.DataFrame]):
+        reps = self.dataset.index.get_level_values(0).nunique()
+        filename = f'{model_name}_{self.num_of_authors}authors_{reps}reps_{self.template_name}.csv'
+        results_df = pd.concat(results, ignore_index=True)
+        results_df.to_csv(self.output_dir / filename)
 
 
 class HuggingFaceLLM(BaseLLM):
     def __init__(self,
+                 output_dir: Path,
                  model_name: str,
                  dataset_path: Path,
-                 crop: bool,
                  template: str,
                  hf_token: Optional[str] = None,
                  logger: Optional[logging.Logger] = None):
@@ -155,10 +153,9 @@ class HuggingFaceLLM(BaseLLM):
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.tokenizer.pad_token = self.tokenizer.eos_token
         super().__init__(
+            output_dir=output_dir,
             dataset_path=dataset_path,
             template=template,
-            crop=crop,
-            min_tokens_per_text=56,
             max_tokens=self.model.config.max_position_embeddings,
             max_new_tokens=800,
             logger=logger or get_child_logger(__name__)
