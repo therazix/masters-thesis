@@ -288,7 +288,7 @@ def test_mistral(ctx: click.Context, output_dir: Path, testing_set: Path, templa
               required=True,
               type=str,
               help="What prompt template to use for the model's instructions. "
-                   "Either 'en', 'cz' or 'cz-1shot'.")
+                   "Either 'en', 'cz', 'cz-1shot' or 'cz-inference'.")
 @click.option('--token',
               required=False,
               type=str,
@@ -299,6 +299,39 @@ def test_llama3(ctx: click.Context, output_dir: Path, testing_set: Path, templat
                 token: Optional[str] = None):
     logger = ctx.obj['logger']
     llama3 = models.llama3.Llama3(output_dir, testing_set, template, token, logger)
+    llama3.test()
+
+
+@click.command(name='llama3-ft')
+@click.option('-o', '--output-dir',
+              required=True,
+              type=click.Path(file_okay=False, dir_okay=True, readable=True),
+              callback=to_path,
+              help='Directory for outputs during testing.')
+@click.option('--testing-set',
+              required=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              help='Testing set for the model.')
+@click.option('--model-name',
+              required=True,
+              type=str,
+              help='Name of the model to test (Hugging Face).')
+@click.option('--template',
+              required=True,
+              type=str,
+              help="What prompt template to use for the model's instructions. "
+                   "Either 'en', 'cz', 'cz-1shot' or 'cz-inference'.")
+@click.option('--token',
+              required=False,
+              type=str,
+              help='Hugging Face API token. If not provided, HF_TOKEN environment '
+                   'variable will be used.')
+@click.pass_context
+def test_llama3_ft(ctx: click.Context, output_dir: Path, testing_set: Path, model_name: str,
+                   template: str, token: Optional[str] = None):
+    logger = ctx.obj['logger']
+    llama3 = models.llama3.Llama3FT(output_dir, testing_set, model_name, template, token, logger)
     llama3.test()
 
 
@@ -340,7 +373,62 @@ test.add_command(test_xlm_roberta)
 test.add_command(test_ensemble)
 test.add_command(test_mistral)
 test.add_command(test_llama3)
+test.add_command(test_llama3_ft)
 test.add_command(test_gpt4o)
+
+
+### Finetuning commands ###
+
+@click.command(name='llama3')
+@click.option('-o', '--output-dir',
+              required=True,
+              type=click.Path(file_okay=False, dir_okay=True, readable=True),
+              callback=to_path,
+              help='Directory for outputs during testing.')
+@click.option('--repo-id',
+              required=True,
+              type=str,
+              help='Hugging Face model repository ID.')
+@click.option('--training-set',
+              required=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              help='Training set for the model.')
+@click.option('--testing-set',
+              required=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              help='Testing set for the model.')
+@click.option('--template',
+              required=True,
+              type=str,
+              help="What prompt template to use for the model's instructions. "
+                   "Either 'en', 'cz', 'cz-1shot' or 'cz-inference'.")
+@click.option('--epochs',
+              required=False,
+              type=int,
+              default=6,
+              help='Number of epochs for finetuning.')
+@click.option('--token',
+              required=False,
+              type=str,
+              help='Hugging Face API token. If not provided, HF_TOKEN environment '
+                   'variable will be used.')
+@click.pass_context
+def finetune_llama3(ctx: click.Context, output_dir: Path, repo_id: str, training_set: Path,
+                    testing_set: Path, template: str, epochs: int, token: Optional[str] = None):
+    logger = ctx.obj['logger']
+    model_name = 'unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit'
+    llama3 = models.llama3.Llama3FT(output_dir, testing_set, model_name, template, token, logger)
+    llama3.finetune(str(training_set), repo_id, epochs)
+    llama3.test()
+
+@click.group()
+def finetune():
+    pass
+
+
+finetune.add_command(finetune_llama3)
 
 
 ### Other commands ###
@@ -405,18 +493,30 @@ def dataset_info(ctx: click.Context, input_file: Path, top: List[int]):
 
 @click.command(name='create-finetuning')
 @click.option('-i', '--input-file',
-              multiple=True,
+              required=True,
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
               callback=to_path,
-              default=[],
-              help='Path to the dataset.')
+              help='Input file with scraped data.')
+@click.option('-o', '--output-dir',
+              required=False,
+              type=click.Path(file_okay=False, dir_okay=True, writable=True),
+              callback=to_path,
+              help='Output directory for processed dataset.')
+@click.option('-n', '--num-of-authors',
+              required=True,
+              type=int,
+              help='Number of authors to extract. Authors with the most texts are selected.')
+@click.option('-r', '--reps',
+                default=3,
+                type=int,
+                help='Number of repetitions for each author.')
 @click.pass_context
-def dataset_create_finetuning(ctx: click.Context, input_file: List[Path]):
+def dataset_create_finetuning(ctx: click.Context, input_file: Path, output_dir: Optional[Path],
+                              num_of_authors: int, reps: int):
     logger = ctx.obj['logger']
-    input_files = list(set([i.resolve() for i in input_file if i]))
-    if not input_files:
-        raise ValueError('At least one input file must be provided.')
-    dataset_parser.DatasetParser.create_finetuning(input_files, logger)
+    output_dir = output_dir or Path('datasets')
+    parser = dataset_parser.DatasetParser(input_file, logger)
+    parser.create_finetuning(output_dir, num_of_authors, reps)
 
 
 @click.command(name='create-prompting')
@@ -488,6 +588,7 @@ def cli(ctx: click.Context, verbose: int):
 cli.add_command(scrape)
 cli.add_command(train)
 cli.add_command(test)
+cli.add_command(finetune)
 cli.add_command(dataset)
 
 if __name__ == "__main__":

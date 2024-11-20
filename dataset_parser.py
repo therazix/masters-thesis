@@ -10,7 +10,12 @@ import pandas as pd
 import tiktoken
 from pandarallel import pandarallel
 
-from models import BaseLLM
+import copy
+
+import models.gpt_4o
+import prompts
+import json
+from models.gpt_4o import GPT4o
 from utils import clean_text, get_child_logger
 
 pd.options.mode.chained_assignment = None
@@ -165,11 +170,11 @@ class DatasetParser:
             split_indexes = [int(sum(split[:i + 1]) * len(out_of_class_df)) for i in range(len(split) - 1)]  # noqa
 
             train_out_of_class = out_of_class_df.iloc[:split_indexes[0]]
-            val_out_od_class = out_of_class_df.iloc[split_indexes[0]:split_indexes[1]]
+            val_out_of_class = out_of_class_df.iloc[split_indexes[0]:split_indexes[1]]
             test_out_of_class = out_of_class_df.iloc[split_indexes[1]:]
 
             train = pd.concat([train, train_out_of_class], ignore_index=True)
-            val = pd.concat([val, val_out_od_class], ignore_index=True)
+            val = pd.concat([val, val_out_of_class], ignore_index=True)
             test = pd.concat([test, test_out_of_class], ignore_index=True)
 
         # Rename all authors
@@ -211,7 +216,7 @@ class DatasetParser:
         self.df['text'] = self.df['text'].parallel_apply(lambda x: clean_text(x))
 
         # Filter out texts that are too short
-        df = self.df[self.df['text'].parallel_apply(lambda x: _has_minimum_length(x))]
+        self.df = self.df[self.df['text'].parallel_apply(lambda x: _has_minimum_length(x))]
 
         columns = ['label', 'query_text', 'example_text']
         results = []
@@ -220,7 +225,7 @@ class DatasetParser:
             authors_texts = []
             for i, author in enumerate(authors):
                 try:
-                    text_1, text_2 = df[df['label'] == author]['text'].sample(2)
+                    text_1, text_2 = self.df[self.df['label'] == author]['text'].sample(2)
                 except ValueError as err:
                     raise ValueError(f'Not enough samples for author {author}.') from err
                 authors_texts.append([i, text_1, text_2])
@@ -232,35 +237,108 @@ class DatasetParser:
         results_df.to_csv(self.output_dir / filename, index=True)
         self.logger.info(f"Dataset created and saved to '{self.output_dir}'")
 
-    @classmethod
-    def create_finetuning(cls, input_files: List[Path], logger: Optional[logging.Logger] = None):
-        output_dir = Path('datasets/finetuning/')
-        output_dir.mkdir(parents=True, exist_ok=True)
-        logger = get_child_logger(__name__, logger)
 
-        combined_df = pd.DataFrame(columns=['query_text', 'example_texts', 'correct_label'])
-        for file in input_files:
-            logger.debug(f"Reading input file '{file}'")
-            df = pd.read_csv(file)
-            file_samples = pd.DataFrame(columns=['query_text', 'example_texts', 'correct_label'])
-            for i in range(3):
-                samples = BaseLLM.extract_samples(df)
-                examples = json.dumps(
-                    {row['label']: row['example_text'] for _, row in samples.iterrows()},
-                    ensure_ascii=False
+    def create_finetuning(self, output_dir: Path, num_of_authors: int, reps: int):
+        if num_of_authors < 2:
+            raise ValueError('Number of authors must be at least 2')
+
+        self.logger.debug('Creating dataset for fine-tuning...')
+
+        self.output_dir = output_dir.resolve()
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        _init_pandarallel()
+
+        self.df['text'] = self.df['text'].parallel_apply(lambda x: clean_text(x))
+
+        # Filter out texts that are too short
+        self.df = self.df[self.df['text'].parallel_apply(lambda x: _has_minimum_length(x))]
+
+        results = pd.DataFrame(columns=['label', 'query_text', 'example_text'])
+        for _ in range(reps):
+            authors = random.sample(self.authors, num_of_authors)
+            authors_texts = []
+            for i, author in enumerate(authors):
+                try:
+                    text_1, text_2 = self.df[self.df['label'] == author]['text'].sample(2)
+                except ValueError as err:
+                    raise ValueError(f'Not enough samples for author {author}.') from err
+                authors_texts.append([i, text_1, text_2])
+
+            authors_df = pd.DataFrame(authors_texts, columns=['label', 'query_text', 'example_text'])
+
+            examples = json.dumps(
+                {row['label']: row['example_text'] for _, row in authors_df.iterrows()},
+                ensure_ascii=False
+            )
+
+            authors_df['example_text'] = examples
+            results = pd.concat([results, authors_df], ignore_index=True)
+
+        results = results.sample(frac=1).reset_index(drop=True)
+
+        filename = f'finetuning_{num_of_authors}authors_{reps}reps.jsonl'
+        with (self.output_dir / filename).open('w', encoding='utf-8') as f:
+            for i, row in results.iterrows():
+                messages = copy.deepcopy(prompts.prompts_finetuning)
+                messages[-1]['content'] = messages[-1]['content'].format(
+                    query=row['query_text'],
+                    examples=row['example_text'],
+                    correct_author=row['label']
                 )
-                for _, row in samples.iterrows():
-                    file_samples = pd.concat([pd.DataFrame(
-                        [[row['query_text'], examples, row['label']]], columns=file_samples.columns
-                    ), file_samples], ignore_index=True)
+                json_row = {
+                    'custom_id': f'request_{i}',
+                    'method': 'POST',
+                    'url': '/v1/chat/completions',
+                    'body': {
+                        'model': 'gpt-4o-mini-2024-07-18',
+                        'messages': messages,
+                        'max_tokens': 1000,
+                        'temperature': 0.0
 
-            combined_df = pd.concat([combined_df, file_samples], ignore_index=True)
-        combined_df = combined_df.sample(frac=1).reset_index(drop=True)
-        combined_df.to_csv(output_dir / 'finetuning.csv', index=False)
+                    }
+                }
+                f.write(json.dumps(json_row, ensure_ascii=False) + '\n')
+
+        self.logger.info(f"Dataset created and saved to '{self.output_dir}'")
 
 
 def _has_minimum_length(text: str) -> bool:
     encoding = tiktoken.encoding_for_model('gpt-4o')
     count = len(encoding.encode(text))
     return count > 60
+
+
+# def complete_finetune_data(dataset_path: Path, openai_api_key: Optional[str] = None):
+#     client = GPT4o.get_client(openai_api_key)
+#     df = pd.read_csv(dataset_path)
+#     results_df = df.copy()
+#     for i, row in df.iterrows():
+#         query = row['query_text']
+#         examples = row['example_text']
+#         correct_author = row['label']
+#         messages = copy.deepcopy(prompts.prompts_finetuning)
+#         messages[-1]['content'] = messages[-1]['content'].format(query=query,
+#                                                                  examples=examples,
+#                                                                  correct_author=correct_author)
+#         try:
+#             completion = client.chat.completions.create(
+#                 model=models.gpt_4o.MODEL_NAME,
+#                 messages=messages,
+#                 max_tokens=800,
+#                 temperature=0.0,
+#             )
+#             response = completion.choices[0].message
+#             if response.parsed:
+#                 result = cast(GPTResponse, response.parsed)
+#             elif response.content:
+#                 result = response.content
+#             else:
+#                 result = 'error'
+#         except Exception:
+#             result = 'error'
+#
+#         results_df.loc[i, 'finetune_response'] = result
+#
+#     results_df.to_csv(dataset_path.parent / (dataset_path.stem + '_complete.csv'))
 

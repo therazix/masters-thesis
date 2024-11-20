@@ -1,4 +1,5 @@
 import copy
+import json
 import logging
 import os
 import re
@@ -8,14 +9,28 @@ from typing import Optional, List, Dict, Tuple
 import numpy as np
 import pandas as pd
 import torch
+from datasets import load_dataset, DatasetDict
 from dotenv import load_dotenv
 from huggingface_hub import login
 from transformers import AutoModelForCausalLM, \
     AutoTokenizer
+from unsloth import FastLanguageModel
+from unsloth.chat_templates import get_chat_template
 
 import prompts
 from metrics import compute_metrics
 from utils import get_child_logger
+
+
+def get_hf_token(hf_token: Optional[str] = None) -> str:
+    if hf_token:
+        return hf_token
+    load_dotenv()
+    token = os.getenv('HF_TOKEN')
+    if not token:
+        raise ValueError('Hugging Face API token is missing. Please set HF_TOKEN '
+                         'environment variable or pass it as an argument.')
+    return token
 
 
 class BaseLLM:
@@ -46,11 +61,13 @@ class BaseLLM:
             return prompts.prompts_cz
         if template.lower() == 'cz-1shot':
             return prompts.prompts_cz_1shot
-        raise ValueError('Invalid template. Available templates are: en, cz, cz-1shot')
+        if template.lower() == 'cz-inference':
+            return prompts.prompts_cz_inference
+        raise ValueError('Invalid template. Available templates are: en, cz, cz-1shot, cz-inference')
 
     def format_prompts(self, query: str, examples: str):
         messages = copy.deepcopy(self.template)
-        messages[-1]['content'] = messages[-1]['content'].format(query=query, examples=examples)
+        messages[-1]['content'] = messages[-1]['content'].format(query_text=query, example_text=examples)
         return messages
 
     def _parse_dataset(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -145,7 +162,8 @@ class HuggingFaceLLM(BaseLLM):
                  template: str,
                  hf_token: Optional[str] = None,
                  logger: Optional[logging.Logger] = None):
-        self._login(hf_token)
+        self.hf_token = get_hf_token(hf_token)
+        self._login(self.hf_token)
         self.model = AutoModelForCausalLM.from_pretrained(model_name,
                                                           torch_dtype=torch.float16,
                                                           attn_implementation='flash_attention_2',
@@ -162,15 +180,92 @@ class HuggingFaceLLM(BaseLLM):
         )
 
     @staticmethod
-    def _login(hf_token: Optional[str] = None):
-        load_dotenv()
-        token = hf_token or os.getenv('HF_TOKEN')
-        if not token:
-            raise ValueError('Hugging Face API token is missing. Please set HF_TOKEN '
-                             'environment variable or pass it as an argument.')
-        login(token=token)
+    def _login(token: str):
+        login(token)
 
     def count_tokens(self, text: str) -> int:
         encoding = self.tokenizer(text)
         return len(encoding.input_ids)
 
+
+class UnslothLLM(BaseLLM):
+    def __init__(self,
+                 output_dir: Path,
+                 model_name: str,
+                 chat_template: str,
+                 dataset_path: Path,
+                 template: str,
+                 hf_token: Optional[str] = None,
+                 logger: Optional[logging.Logger] = None):
+        self.hf_token = get_hf_token(hf_token)
+        self._login(self.hf_token)
+
+        self.max_seq_length = 1024
+
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=model_name,
+            max_seq_length=self.max_seq_length,
+            dtype=None,  # None = autodetect
+            load_in_4bit=True,
+            token=self.hf_token,
+        )
+
+        self.model = FastLanguageModel.get_peft_model(
+            model,
+            r=16,
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                            "gate_proj", "up_proj", "down_proj", ],
+            lora_alpha=16,
+            lora_dropout=0.05,
+            bias="none",
+            use_gradient_checkpointing="unsloth",
+            random_state=37,
+            use_rslora=False,
+            loftq_config=None,
+        )
+        self.tokenizer = get_chat_template(tokenizer, chat_template=chat_template)
+
+        super().__init__(
+            output_dir=output_dir,
+            dataset_path=dataset_path,
+            template=template,
+            max_tokens=self.model.config.max_position_embeddings,
+            max_new_tokens=1000,
+            logger=logger or get_child_logger(__name__)
+        )
+
+    @staticmethod
+    def _login(token: str):
+        login(token)
+
+    def count_tokens(self, text: str) -> int:
+        encoding = self.tokenizer(text)
+        return len(encoding.input_ids)
+
+    @staticmethod
+    def _format_finetuning_template(row):
+        messages = copy.deepcopy(prompts.prompts_cz_finetuning)
+        query_text = row["query_text"]
+        examples = json.loads(row["example_text"])
+        example_text = '\n'.join(f'Autor {key}: {value}' for key, value in examples.items())
+        response = row["response"]
+        label = row["label"]
+
+        messages[1]['content'] = messages[1]['content'].format(query_text=query_text, example_text=example_text)
+        messages[2]['content'] = messages[2]['content'].format(response=response, label=label)
+        return messages
+
+    def _format_finetuning_prompts(self, row):
+        messages = self._format_finetuning_template(row)
+        text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+        row["text"] = text
+        return row
+
+    def load_finetuning_dataset(self, dataset_name: str) -> DatasetDict:
+        if Path(dataset_name).exists():
+            dataset = load_dataset('csv', data_files=dataset_name, split='all')
+        else:
+            dataset = load_dataset(dataset_name, split='all')
+
+        dataset = dataset.map(self._format_finetuning_prompts)
+        return dataset.train_test_split(test_size=0.1)

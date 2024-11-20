@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from utils import get_child_logger
 from . import BaseLLM
 
+MODEL_NAME = 'gpt-4o-2024-08-06'
 
 class GPTResponse(BaseModel):
     analysis: str
@@ -25,8 +26,8 @@ class GPT4o(BaseLLM):
                  template: str,
                  openai_api_key: Optional[str] = None,
                  logger: Optional[logging.Logger] = None):
-        self.client = self._get_client(openai_api_key)
-        self.model_name = 'gpt-4o-2024-08-06'
+        self.client = self.get_client(openai_api_key)
+        self.model_name = MODEL_NAME
         self.model_name_for_encoding = 'gpt-4o'
         super().__init__(
             output_dir=output_dir,
@@ -38,7 +39,7 @@ class GPT4o(BaseLLM):
         )
 
     @staticmethod
-    def _get_client(openai_api_key: Optional[str]) -> OpenAI:
+    def get_client(openai_api_key: Optional[str]) -> OpenAI:
         if openai_api_key is None:
             dotenv.load_dotenv()
             openai_api_key = os.getenv('OPENAI_API_KEY')
