@@ -14,8 +14,10 @@ from dotenv import load_dotenv
 from huggingface_hub import login
 from transformers import AutoModelForCausalLM, \
     AutoTokenizer
-from unsloth import FastLanguageModel
-from unsloth.chat_templates import get_chat_template
+
+if os.getenv('IMPORT_FOR_LLM') == '1':
+    from unsloth import FastLanguageModel
+    from unsloth.chat_templates import get_chat_template
 
 import prompts
 from metrics import compute_metrics
@@ -147,11 +149,31 @@ class BaseLLM:
         }
         return avg, std
 
-    def save_results(self, model_name: str, results: List[pd.DataFrame]):
+    def save_results(self, model_name: str, results: List[pd.DataFrame], avg: Dict[str, float], std: Dict[str, float]):
         reps = self.dataset.index.get_level_values(0).nunique()
-        filename = f'{model_name}_{self.num_of_authors}authors_{reps}reps_{self.template_name}.csv'
+        filename = f'{model_name}_{self.num_of_authors}authors_{reps}reps_{self.template_name}.json'
         results_df = pd.concat(results, ignore_index=True)
-        results_df.to_csv(self.output_dir / filename)
+        json_result = {
+            'avg': avg,
+            'std': std,
+            'data': json.loads(results_df.to_json(orient='records'))
+        }
+        (self.output_dir / filename).open('w').write(json.dumps(json_result, indent=2, ensure_ascii=False))
+
+    def parse_response(self, text: str):
+        response = {}
+        matches = re.findall(r'###\s*Analýza:\s*(.+)\s*###\s*Výsledek:', text, re.IGNORECASE)
+        if matches:
+            response['analysis'] = matches[-1]
+        else:
+            response['analysis'] = text
+        matches = re.findall(r'###\s*Výsledek:\s*(?:autor\s+)?(\d+)', text, re.IGNORECASE)
+        if matches:
+            response['answer'] = matches[-1]
+        else:
+            response['answer'] = 'error'
+            self.logger.error(f'Failed to parse response: {text}')
+        return response
 
 
 class HuggingFaceLLM(BaseLLM):
@@ -212,10 +234,10 @@ class UnslothLLM(BaseLLM):
 
         self.model = FastLanguageModel.get_peft_model(
             model,
-            r=16,
+            r=32,
             target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
                             "gate_proj", "up_proj", "down_proj", ],
-            lora_alpha=16,
+            lora_alpha=128,
             lora_dropout=0.05,
             bias="none",
             use_gradient_checkpointing="unsloth",

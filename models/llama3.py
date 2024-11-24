@@ -1,14 +1,15 @@
 import json
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 from transformers import TrainingArguments
 from trl import SFTTrainer
-from unsloth import is_bfloat16_supported, FastLanguageModel
+
+if os.getenv('IMPORT_FOR_LLM') == '1':
+    from unsloth import is_bfloat16_supported, FastLanguageModel
 
 from utils import get_child_logger
 from . import HuggingFaceLLM, UnslothLLM
@@ -48,23 +49,6 @@ class Llama3(HuggingFaceLLM):
                                       pad_token_id=self.tokenizer.eos_token_id)
         return self.tokenizer.decode(outputs[0][prompt_length:], skip_special_tokens=True)
 
-    def _parse_response(self, text: str):
-        try:
-            json_start = text.index('{')
-            json_end = len(text) - text[::-1].index('}')
-            text = text[json_start:json_end]
-            response = json.loads(text, strict=False)
-        except (json.JSONDecodeError, IndexError, ValueError) as err:
-            matches = re.findall(r'["\']?answer["\']?: ["\']?(\d+)["\']?', text)
-            response = json.loads('{}')
-            response['analysis'] = text
-            if matches:
-                response['answer'] = matches[-1]
-            else:
-                response['answer'] = 'error'
-                self.logger.error(f'Failed to parse response: {text}')
-        return response
-
     def test(self):
         result = []
         for rep, rep_data in self.dataset.groupby(level=0):
@@ -76,7 +60,7 @@ class Llama3(HuggingFaceLLM):
             responses = []
             for _, row in data.iterrows():
                 response_str = self._generate(row['query_text'], examples)
-                response = self._parse_response(response_str)
+                response = self.parse_response(response_str)
                 response['label'] = str(row['label'])
                 response['rep'] = str(rep)
                 responses.append(response)
@@ -85,8 +69,8 @@ class Llama3(HuggingFaceLLM):
             responses_df[['label', 'answer']] = responses_df[['label', 'answer']].astype(str)
             result.append(responses_df)
 
-        self.save_results('llama3', result)
         avg, std = self.evaluate(result)
+        self.save_results('llama3', result, avg, std)
         self.logger.info(f'Average: {avg}')
         self.logger.info(f'Standard deviation: {std}')
 
@@ -165,17 +149,6 @@ class Llama3FT(UnslothLLM):
                                       use_cache=True)
         return self.tokenizer.decode(outputs[0][prompt_length:], skip_special_tokens=True)
 
-    def _parse_response(self, text: str):
-        response = json.loads('{}')
-        response['analysis'] = text
-        matches = re.findall(r'###\s*Výsledek:\s*(?:autor\s+)?(\d+)', text, re.IGNORECASE)
-        if matches:
-            response['answer'] = matches[-1]
-        else:
-            response['answer'] = 'error'
-            self.logger.error(f'Failed to parse response: {text}')
-        return response
-
     def test(self):
         FastLanguageModel.for_inference(self.model)
 
@@ -186,7 +159,7 @@ class Llama3FT(UnslothLLM):
             responses = []
             for _, row in data.iterrows():
                 response_str = self._generate(row['query_text'], examples)
-                response = self._parse_response(response_str)
+                response = self.parse_response(response_str)
                 response['label'] = str(row['label'])
                 response['rep'] = str(rep)
                 responses.append(response)
@@ -195,7 +168,7 @@ class Llama3FT(UnslothLLM):
             responses_df[['label', 'answer']] = responses_df[['label', 'answer']].astype(str)
             result.append(responses_df)
 
-        self.save_results('llama3_ft', result)
         avg, std = self.evaluate(result)
+        self.save_results('llama3_ft', result, avg, std)
         self.logger.info(f'Average: {avg}')
         self.logger.info(f'Standard deviation: {std}')

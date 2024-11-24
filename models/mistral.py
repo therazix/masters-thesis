@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 from pathlib import Path
 from typing import Optional
 
@@ -44,23 +43,6 @@ class Mistral(HuggingFaceLLM):
                                       pad_token_id=self.tokenizer.eos_token_id)
         return self.tokenizer.decode(outputs[0][prompt_length:], skip_special_tokens=True)
 
-    def _parse_response(self, text: str):
-        try:
-            json_start = text.index('{')
-            json_end = len(text) - text[::-1].index('}')
-            text = text[json_start:json_end]
-            response = json.loads(text, strict=False)
-        except (json.JSONDecodeError, IndexError, ValueError) as err:
-            matches = re.findall(r'["\']?answer["\']?: ["\']?(\d+)["\']?', text)
-            response = json.loads('{}')
-            response['analysis'] = text
-            if matches:
-                response['answer'] = matches[-1]
-            else:
-                response['answer'] = 'error'
-                self.logger.error(f'Failed to parse response: {text}')
-        return response
-
     def test(self):
         result = []
         for rep, rep_data in self.dataset.groupby(level=0):
@@ -72,7 +54,7 @@ class Mistral(HuggingFaceLLM):
             responses = []
             for _, row in data.iterrows():
                 response_str = self._generate(row['query_text'], examples)
-                response = self._parse_response(response_str)
+                response = self.parse_response(response_str)
                 response['label'] = str(row['label'])
                 response['rep'] = str(rep)
                 responses.append(response)
@@ -81,7 +63,8 @@ class Mistral(HuggingFaceLLM):
             responses_df[['label', 'answer']] = responses_df[['label', 'answer']].astype(str)
             result.append(responses_df)
 
-        self.save_results('mistral', result)
+
         avg, std = self.evaluate(result)
+        self.save_results('mistral', result, avg, std)
         self.logger.info(f'Average: {avg}')
         self.logger.info(f'Standard deviation: {std}')

@@ -2,6 +2,7 @@ import logging
 import sys
 import tempfile
 import time
+import os
 from pathlib import Path
 from typing import Optional, List
 
@@ -366,6 +367,7 @@ def test_gpt4o(ctx: click.Context, output_dir: Path, testing_set: Path, template
 
 @click.group()
 def test():
+    os.environ['IMPORT_FOR_LLM'] = '1'
     pass
 
 
@@ -425,6 +427,7 @@ def finetune_llama3(ctx: click.Context, output_dir: Path, repo_id: str, training
 
 @click.group()
 def finetune():
+    os.environ['IMPORT_FOR_LLM'] = '1'
     pass
 
 
@@ -583,6 +586,7 @@ def cli(ctx: click.Context, verbose: int):
 
     ctx.ensure_object(dict)
     ctx.obj['logger'] = logger
+    os.environ['IMPORT_FOR_LLM'] = '0'
 
 
 cli.add_command(scrape)

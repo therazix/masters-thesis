@@ -282,8 +282,8 @@ class DatasetParser:
             for i, row in results.iterrows():
                 messages = copy.deepcopy(prompts.prompts_finetuning)
                 messages[-1]['content'] = messages[-1]['content'].format(
-                    query=row['query_text'],
-                    examples=row['example_text'],
+                    query_text=row['query_text'],
+                    example_text=row['example_text'],
                     correct_author=row['label']
                 )
                 json_row = {
@@ -294,7 +294,7 @@ class DatasetParser:
                         'model': 'gpt-4o-mini-2024-07-18',
                         'messages': messages,
                         'max_tokens': 1000,
-                        'temperature': 0.0
+                        'temperature': 0.7
 
                     }
                 }
