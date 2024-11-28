@@ -2,7 +2,6 @@ import logging
 import sys
 import tempfile
 import time
-import os
 from pathlib import Path
 from typing import Optional, List
 
@@ -256,21 +255,26 @@ def test_ensemble(ctx: click.Context, model: Path, classifiers_dir: Path, testin
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
               callback=to_path,
               help='Testing set for the model.')
+@click.option('--model-name',
+              required=False,
+              type=str,
+              default='unsloth/mistral-7b-instruct-v0.3',
+              help='Name of the model to test (Hugging Face).')
 @click.option('--template',
               required=True,
               type=str,
               help="What prompt template to use for the model's instructions. "
-                   "Either 'en', 'cz' or 'cz-1shot'.")
+                   "Either 'en', 'cz', 'cz-1shot' or 'cz-inference'.")
 @click.option('--token',
               required=False,
               type=str,
               help='Hugging Face API token. If not provided, HF_TOKEN environment '
                    'variable will be used.')
 @click.pass_context
-def test_mistral(ctx: click.Context, output_dir: Path, testing_set: Path, template: str,
-                 token: Optional[str] = None):
+def test_mistral(ctx: click.Context, output_dir: Path, testing_set: Path, model_name: str,
+                   template: str, token: Optional[str] = None):
     logger = ctx.obj['logger']
-    mistral = models.mistral.Mistral(output_dir, testing_set, template, token, logger)
+    mistral = models.mistral.Mistral(output_dir, testing_set, model_name, template, token, logger)
     mistral.test()
 
 
@@ -285,38 +289,10 @@ def test_mistral(ctx: click.Context, output_dir: Path, testing_set: Path, templa
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
               callback=to_path,
               help='Testing set for the model.')
-@click.option('--template',
-              required=True,
-              type=str,
-              help="What prompt template to use for the model's instructions. "
-                   "Either 'en', 'cz', 'cz-1shot' or 'cz-inference'.")
-@click.option('--token',
+@click.option('--model-name',
               required=False,
               type=str,
-              help='Hugging Face API token. If not provided, HF_TOKEN environment '
-                   'variable will be used.')
-@click.pass_context
-def test_llama3(ctx: click.Context, output_dir: Path, testing_set: Path, template: str,
-                token: Optional[str] = None):
-    logger = ctx.obj['logger']
-    llama3 = models.llama3.Llama3(output_dir, testing_set, template, token, logger)
-    llama3.test()
-
-
-@click.command(name='llama3-ft')
-@click.option('-o', '--output-dir',
-              required=True,
-              type=click.Path(file_okay=False, dir_okay=True, readable=True),
-              callback=to_path,
-              help='Directory for outputs during testing.')
-@click.option('--testing-set',
-              required=True,
-              type=click.Path(file_okay=True, dir_okay=False, readable=True),
-              callback=to_path,
-              help='Testing set for the model.')
-@click.option('--model-name',
-              required=True,
-              type=str,
+              default='unsloth/Meta-Llama-3.1-8B-Instruct',
               help='Name of the model to test (Hugging Face).')
 @click.option('--template',
               required=True,
@@ -329,10 +305,10 @@ def test_llama3(ctx: click.Context, output_dir: Path, testing_set: Path, templat
               help='Hugging Face API token. If not provided, HF_TOKEN environment '
                    'variable will be used.')
 @click.pass_context
-def test_llama3_ft(ctx: click.Context, output_dir: Path, testing_set: Path, model_name: str,
+def test_llama3(ctx: click.Context, output_dir: Path, testing_set: Path, model_name: str,
                    template: str, token: Optional[str] = None):
     logger = ctx.obj['logger']
-    llama3 = models.llama3.Llama3FT(output_dir, testing_set, model_name, template, token, logger)
+    llama3 = models.llama3.Llama3(output_dir, testing_set, model_name, template, token, logger)
     llama3.test()
 
 
@@ -367,7 +343,6 @@ def test_gpt4o(ctx: click.Context, output_dir: Path, testing_set: Path, template
 
 @click.group()
 def test():
-    os.environ['IMPORT_FOR_LLM'] = '1'
     pass
 
 
@@ -375,22 +350,26 @@ test.add_command(test_xlm_roberta)
 test.add_command(test_ensemble)
 test.add_command(test_mistral)
 test.add_command(test_llama3)
-test.add_command(test_llama3_ft)
 test.add_command(test_gpt4o)
 
 
 ### Finetuning commands ###
 
-@click.command(name='llama3')
+@click.command(name='mistral')
 @click.option('-o', '--output-dir',
               required=True,
               type=click.Path(file_okay=False, dir_okay=True, readable=True),
               callback=to_path,
               help='Directory for outputs during testing.')
+@click.option('--model-name',
+              required=False,
+              type=str,
+              default='unsloth/mistral-7b-instruct-v0.3-bnb-4bit',
+              help='Name of the model to finetune (Hugging Face).')
 @click.option('--repo-id',
               required=True,
               type=str,
-              help='Hugging Face model repository ID.')
+              help='Hugging Face model repository ID for saving the finetuned model.')
 @click.option('--training-set',
               required=True,
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
@@ -417,20 +396,70 @@ test.add_command(test_gpt4o)
               help='Hugging Face API token. If not provided, HF_TOKEN environment '
                    'variable will be used.')
 @click.pass_context
-def finetune_llama3(ctx: click.Context, output_dir: Path, repo_id: str, training_set: Path,
-                    testing_set: Path, template: str, epochs: int, token: Optional[str] = None):
+def finetune_mistral(ctx: click.Context, output_dir: Path, model_name: str, repo_id: str,
+                    training_set: Path, testing_set: Path, template: str, epochs: int,
+                    token: Optional[str] = None):
     logger = ctx.obj['logger']
-    model_name = 'unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit'
-    llama3 = models.llama3.Llama3FT(output_dir, testing_set, model_name, template, token, logger)
+    mistral = models.mistral.Mistral(output_dir, testing_set, model_name, template, token, logger)
+    mistral.finetune(str(training_set), repo_id, epochs)
+    mistral.test()
+
+
+@click.command(name='llama3')
+@click.option('-o', '--output-dir',
+              required=True,
+              type=click.Path(file_okay=False, dir_okay=True, readable=True),
+              callback=to_path,
+              help='Directory for outputs during testing.')
+@click.option('--model-name',
+              required=False,
+              type=str,
+              default='unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit',
+              help='Name of the model to finetune (Hugging Face).')
+@click.option('--repo-id',
+              required=True,
+              type=str,
+              help='Hugging Face model repository ID for saving the finetuned model.')
+@click.option('--training-set',
+              required=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              help='Training set for the model.')
+@click.option('--testing-set',
+              required=True,
+              type=click.Path(file_okay=True, dir_okay=False, readable=True),
+              callback=to_path,
+              help='Testing set for the model.')
+@click.option('--template',
+              required=True,
+              type=str,
+              help="What prompt template to use for the model's instructions. "
+                   "Either 'en', 'cz', 'cz-1shot' or 'cz-inference'.")
+@click.option('--epochs',
+              required=False,
+              type=int,
+              default=6,
+              help='Number of epochs for finetuning.')
+@click.option('--token',
+              required=False,
+              type=str,
+              help='Hugging Face API token. If not provided, HF_TOKEN environment '
+                   'variable will be used.')
+@click.pass_context
+def finetune_llama3(ctx: click.Context, output_dir: Path, model_name: str, repo_id: str,
+                    training_set: Path, testing_set: Path, template: str, epochs: int,
+                    token: Optional[str] = None):
+    logger = ctx.obj['logger']
+    llama3 = models.llama3.Llama3(output_dir, testing_set, model_name, template, token, logger)
     llama3.finetune(str(training_set), repo_id, epochs)
     llama3.test()
 
 @click.group()
 def finetune():
-    os.environ['IMPORT_FOR_LLM'] = '1'
     pass
 
 
+finetune.add_command(finetune_mistral)
 finetune.add_command(finetune_llama3)
 
 
@@ -586,7 +615,6 @@ def cli(ctx: click.Context, verbose: int):
 
     ctx.ensure_object(dict)
     ctx.obj['logger'] = logger
-    os.environ['IMPORT_FOR_LLM'] = '0'
 
 
 cli.add_command(scrape)

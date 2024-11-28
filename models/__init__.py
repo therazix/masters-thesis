@@ -8,16 +8,13 @@ from typing import Optional, List, Dict, Tuple
 
 import numpy as np
 import pandas as pd
-import torch
 from datasets import load_dataset, DatasetDict
 from dotenv import load_dotenv
 from huggingface_hub import login
-from transformers import AutoModelForCausalLM, \
-    AutoTokenizer
-
-if os.getenv('IMPORT_FOR_LLM') == '1':
-    from unsloth import FastLanguageModel
-    from unsloth.chat_templates import get_chat_template
+from transformers import TrainingArguments
+from trl import SFTTrainer
+from unsloth import FastLanguageModel, is_bfloat16_supported
+from unsloth.chat_templates import get_chat_template
 
 import prompts
 from metrics import compute_metrics
@@ -176,40 +173,6 @@ class BaseLLM:
         return response
 
 
-class HuggingFaceLLM(BaseLLM):
-    def __init__(self,
-                 output_dir: Path,
-                 model_name: str,
-                 dataset_path: Path,
-                 template: str,
-                 hf_token: Optional[str] = None,
-                 logger: Optional[logging.Logger] = None):
-        self.hf_token = get_hf_token(hf_token)
-        self._login(self.hf_token)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name,
-                                                          torch_dtype=torch.float16,
-                                                          attn_implementation='flash_attention_2',
-                                                          device_map='auto')
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.tokenizer.pad_token = self.tokenizer.eos_token
-        super().__init__(
-            output_dir=output_dir,
-            dataset_path=dataset_path,
-            template=template,
-            max_tokens=self.model.config.max_position_embeddings,
-            max_new_tokens=800,
-            logger=logger or get_child_logger(__name__)
-        )
-
-    @staticmethod
-    def _login(token: str):
-        login(token)
-
-    def count_tokens(self, text: str) -> int:
-        encoding = self.tokenizer(text)
-        return len(encoding.input_ids)
-
-
 class UnslothLLM(BaseLLM):
     def __init__(self,
                  output_dir: Path,
@@ -219,8 +182,9 @@ class UnslothLLM(BaseLLM):
                  template: str,
                  hf_token: Optional[str] = None,
                  logger: Optional[logging.Logger] = None):
+        os.environ['WANDB_MODE'] = 'disabled'  # disable wandb
         self.hf_token = get_hf_token(hf_token)
-        self._login(self.hf_token)
+        login(self.hf_token)
 
         self.max_seq_length = 1024
 
@@ -235,12 +199,11 @@ class UnslothLLM(BaseLLM):
         self.model = FastLanguageModel.get_peft_model(
             model,
             r=32,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                            "gate_proj", "up_proj", "down_proj", ],
+            target_modules=['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj'],
             lora_alpha=128,
             lora_dropout=0.05,
-            bias="none",
-            use_gradient_checkpointing="unsloth",
+            bias='none',
+            use_gradient_checkpointing='unsloth',
             random_state=37,
             use_rslora=False,
             loftq_config=None,
@@ -256,10 +219,6 @@ class UnslothLLM(BaseLLM):
             logger=logger or get_child_logger(__name__)
         )
 
-    @staticmethod
-    def _login(token: str):
-        login(token)
-
     def count_tokens(self, text: str) -> int:
         encoding = self.tokenizer(text)
         return len(encoding.input_ids)
@@ -267,11 +226,11 @@ class UnslothLLM(BaseLLM):
     @staticmethod
     def _format_finetuning_template(row):
         messages = copy.deepcopy(prompts.prompts_cz_finetuning)
-        query_text = row["query_text"]
-        examples = json.loads(row["example_text"])
+        query_text = row['query_text']
+        examples = json.loads(row['example_text'])
         example_text = '\n'.join(f'Autor {key}: {value}' for key, value in examples.items())
-        response = row["response"]
-        label = row["label"]
+        response = row['response']
+        label = row['label']
 
         messages[1]['content'] = messages[1]['content'].format(query_text=query_text, example_text=example_text)
         messages[2]['content'] = messages[2]['content'].format(response=response, label=label)
@@ -280,7 +239,7 @@ class UnslothLLM(BaseLLM):
     def _format_finetuning_prompts(self, row):
         messages = self._format_finetuning_template(row)
         text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
-        row["text"] = text
+        row['text'] = text
         return row
 
     def load_finetuning_dataset(self, dataset_name: str) -> DatasetDict:
@@ -291,3 +250,62 @@ class UnslothLLM(BaseLLM):
 
         dataset = dataset.map(self._format_finetuning_prompts)
         return dataset.train_test_split(test_size=0.1)
+
+    def finetune(self, dataset_name: str, repo_id: str, epochs: int = 6):
+        dataset = self.load_finetuning_dataset(dataset_name)
+
+        trainer = SFTTrainer(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            train_dataset=dataset['train'],
+            eval_dataset=dataset['test'],
+            dataset_text_field='text',
+            max_seq_length=self.max_seq_length,
+            dataset_num_proc=2,
+            packing=False,
+            args=TrainingArguments(
+                per_device_train_batch_size=4,
+                gradient_accumulation_steps=4,
+                warmup_steps=20,
+                num_train_epochs=epochs,
+                eval_strategy='steps',
+                save_steps=20,
+                eval_steps=20,
+                load_best_model_at_end=True,
+                metric_for_best_model='eval_loss',
+                greater_is_better=False,
+                learning_rate=2e-4,
+                fp16=not is_bfloat16_supported(),
+                bf16=is_bfloat16_supported(),
+                logging_steps=10,
+                optim='adamw_8bit',
+                weight_decay=0.01,
+                lr_scheduler_type='linear',
+                seed=3407,
+                output_dir='output'
+            ),
+        )
+
+        trainer.train()
+
+        trainer.model.push_to_hub(repo_id)
+        trainer.tokenizer.push_to_hub(repo_id)
+
+    def generate(self, query: str, examples: str):
+        messages = self.format_prompts(query, examples)
+        formated_messages = self.tokenizer.apply_chat_template(messages,
+                                                               tokenize=False,
+                                                               add_generation_prompt=True)
+        tokenized_messages = self.tokenizer(formated_messages, return_tensors='pt',
+                                            padding=True).to(self.model.device)
+        input_ids = tokenized_messages['input_ids']
+        attention_mask = tokenized_messages['attention_mask']
+        prompt_length = input_ids.size(-1)
+        outputs = self.model.generate(input_ids,
+                                      top_p=1.0,
+                                      temperature=None,
+                                      do_sample=False,
+                                      attention_mask=attention_mask,
+                                      max_new_tokens=self.max_new_tokens,
+                                      use_cache=True)
+        return self.tokenizer.decode(outputs[0][prompt_length:], skip_special_tokens=True)
