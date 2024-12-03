@@ -186,7 +186,7 @@ class UnslothLLM(BaseLLM):
         self.hf_token = get_hf_token(hf_token)
         login(self.hf_token)
 
-        self.max_seq_length = 1024
+        self.max_seq_length = 8192
 
         model, tokenizer = FastLanguageModel.from_pretrained(
             model_name=model_name,
@@ -198,13 +198,13 @@ class UnslothLLM(BaseLLM):
 
         self.model = FastLanguageModel.get_peft_model(
             model,
-            r=32,
+            r=16,
             target_modules=['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj'],
-            lora_alpha=128,
-            lora_dropout=0.05,
+            lora_alpha=32,
+            lora_dropout=0,
             bias='none',
             use_gradient_checkpointing='unsloth',
-            random_state=37,
+            random_state=3210,
             use_rslora=False,
             loftq_config=None,
         )
@@ -264,24 +264,27 @@ class UnslothLLM(BaseLLM):
             dataset_num_proc=2,
             packing=False,
             args=TrainingArguments(
-                per_device_train_batch_size=4,
+                per_device_train_batch_size=2,
                 gradient_accumulation_steps=4,
-                warmup_steps=20,
+                fp16_full_eval=True,
+                per_device_eval_batch_size=2,
+                eval_accumulation_steps=4,
+                warmup_steps=40,
                 num_train_epochs=epochs,
                 eval_strategy='steps',
-                save_steps=20,
-                eval_steps=20,
+                save_steps=40,
+                eval_steps=40,
                 load_best_model_at_end=True,
                 metric_for_best_model='eval_loss',
                 greater_is_better=False,
                 learning_rate=2e-4,
                 fp16=not is_bfloat16_supported(),
                 bf16=is_bfloat16_supported(),
-                logging_steps=10,
+                logging_steps=20,
                 optim='adamw_8bit',
                 weight_decay=0.01,
                 lr_scheduler_type='linear',
-                seed=3407,
+                seed=3210,
                 output_dir='output'
             ),
         )
