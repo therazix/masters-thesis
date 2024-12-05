@@ -60,9 +60,7 @@ class BaseLLM:
             return prompts.prompts_cz
         if template.lower() == 'cz-1shot':
             return prompts.prompts_cz_1shot
-        if template.lower() == 'cz-inference':
-            return prompts.prompts_cz_inference
-        raise ValueError('Invalid template. Available templates are: en, cz, cz-1shot, cz-inference')
+        raise ValueError('Invalid template. Available templates are: en, cz, or cz-1shot.')
 
     def format_prompts(self, query: str, examples: str):
         messages = copy.deepcopy(self.template)
@@ -177,6 +175,7 @@ class UnslothLLM(BaseLLM):
     def __init__(self,
                  output_dir: Path,
                  model_name: str,
+                 short_model_name: str,
                  chat_template: str,
                  dataset_path: Path,
                  template: str,
@@ -185,6 +184,8 @@ class UnslothLLM(BaseLLM):
         os.environ['WANDB_MODE'] = 'disabled'  # disable wandb
         self.hf_token = get_hf_token(hf_token)
         login(self.hf_token)
+
+        self.short_model_name = short_model_name
 
         self.max_seq_length = 8192
 
@@ -251,7 +252,7 @@ class UnslothLLM(BaseLLM):
         dataset = dataset.map(self._format_finetuning_prompts)
         return dataset.train_test_split(test_size=0.1)
 
-    def finetune(self, dataset_name: str, repo_id: str, epochs: int = 6):
+    def train(self, dataset_name: str, repo_id: str, epochs: int = 6):
         dataset = self.load_finetuning_dataset(dataset_name)
 
         trainer = SFTTrainer(
@@ -312,3 +313,27 @@ class UnslothLLM(BaseLLM):
                                       max_new_tokens=self.max_new_tokens,
                                       use_cache=True)
         return self.tokenizer.decode(outputs[0][prompt_length:], skip_special_tokens=True)
+
+    def test(self):
+        FastLanguageModel.for_inference(self.model)
+
+        result = []
+        for rep, rep_data in self.dataset.groupby(level=0):
+            examples = '\n'.join(f'Autor {row["label"]}: {row["example_text"]}' for _, row in rep_data.iterrows())
+            data = rep_data.sample(self.num_of_authors)
+            responses = []
+            for _, row in data.iterrows():
+                response_str = self.generate(row['query_text'], examples)
+                response = self.parse_response(response_str)
+                response['label'] = str(row['label'])
+                response['rep'] = str(rep)
+                responses.append(response)
+                self.logger.info(str(response))
+            responses_df = pd.DataFrame(responses)
+            responses_df[['label', 'answer']] = responses_df[['label', 'answer']].astype(str)
+            result.append(responses_df)
+
+        avg, std = self.evaluate(result)
+        self.save_results(self.short_model_name, result, avg, std)
+        self.logger.info(f'Average: {avg}')
+        self.logger.info(f'Standard deviation: {std}')

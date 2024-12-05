@@ -171,7 +171,6 @@ prompts_cz = [
             ''').replace('\n', ' ') + textwrap.dedent('''\n
             ### Dotazovaný text:
             {query_text}
-
             ### Texty potenciálních autorů:
             {example_text}
             ''')
@@ -284,7 +283,6 @@ prompts_cz_1shot = [
             ''').replace('\n', ' ') + textwrap.dedent('''\n
             ### Dotazovaný text:
             {query_text}
-
             ### Texty potenciálních autorů:
             {example_text}
             ''')
@@ -402,35 +400,3 @@ prompts_cz_finetuning = [
     }
 ]
 
-prompts_cz_inference = [
-    {
-        'role': 'system',
-        'content': textwrap.dedent('''\
-            Odpověz pouze následujícím formátem obsahujícím dvě položky:
-            ### Analýza:
-            Zde uveď důvod tvé odpovědi.
-            ### Výsledek:
-            ID autora dotazovaného textu.
-            ''') + textwrap.dedent('''\
-            Položka "Výsledek" musí obsahovat pouze číslo, které reprezentuje
-            ID autora. Každý autor v seznamu autorů je jedinečný.
-            Je zaručeno, že jeden z autorů v seznamu známých autorů
-            napsal dotazovaný text. Důvod tvé odpovědi (Analýza) musí být
-            v češtině, musí být formální a stručný a musí být v jednom odstavci
-            bez jakéhokoliv formátování.
-            ''').replace('\n', ' ')
-    },
-    {
-        'role': 'user',
-        'content': textwrap.dedent('''\
-            Tvým úkolem je analyzovat poskytnuté texty a na základě stylistických charakteristik
-            určit, kterému z autorů patří dotazovaný text. Zaměř se výhradně na styl psaní,
-            ignoruj délku textu, funkční styl a téma textu.
-            ''').replace('\n', ' ') + textwrap.dedent('''\n
-            ### Dotazovaný text:
-            {query_text}
-            ### Texty potenciálních autorů:
-            {example_text}
-            ''')
-    }
-]
