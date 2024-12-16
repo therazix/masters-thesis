@@ -63,14 +63,18 @@ def scrape_reddit(ctx: click.Context, output_dir: Optional[Path], user_agent: Op
               required=False,
               is_flag=True,
               help='Continue scraping from the last saved state.')
+@click.option('--limit',
+              required=False,
+              type=int,
+              help='Maximum number of articles to scrape per user.')
 @click.pass_context
 def scrape_csfd(ctx: click.Context, output_dir: Optional[Path],
-                user_agent: Optional[str], resume: bool):
+                user_agent: Optional[str], resume: bool, limit: Optional[int]):
     logger = ctx.obj['logger']
     csfd_scraper = scrapers.csfd.CSFDScraper(TEMP_DIR / 'csfd', output_dir, user_agent, logger)
     if resume:
         csfd_scraper.load_state()
-    csfd_scraper.scrape()
+    csfd_scraper.scrape(limit)
 
 
 @click.command(name='tn-cz')
@@ -501,18 +505,16 @@ def dataset_create(ctx: click.Context, input_file: Path, output_dir: Optional[Pa
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
               callback=to_path,
               help='Path to the dataset.')
-@click.option('-t', '--top',
-              multiple=True,
-              type=int,
-              default=[],
-              help='Show also information for the top N authors.')
+@click.option('--graph',
+              required=False,
+              type=bool,
+              default=False,
+              help='Whether to plot the dataset distribution.')
 @click.pass_context
-def dataset_info(ctx: click.Context, input_file: Path, top: List[int]):
+def dataset_info(ctx: click.Context, input_file: Path, graph: bool):
     logger = ctx.obj['logger']
     parser = dataset_parser.DatasetParser(input_file, logger)
-    top = list(set([t for t in top if t > 0]))
-    top.sort()
-    parser.info(top)
+    parser.info(graph)
 
 
 @click.command(name='create-finetuning')

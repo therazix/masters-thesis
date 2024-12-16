@@ -1,21 +1,19 @@
-import json
 import logging
 import math
 import random
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple
 
-import numpy as np
 import pandas as pd
 import tiktoken
 from pandarallel import pandarallel
 
+import matplotlib.pyplot as plt
+import numpy as np
 import copy
 
-import models.gpt_4o
 import prompts
 import json
-from models.gpt_4o import GPT4o
 from utils import clean_text, get_child_logger
 
 pd.options.mode.chained_assignment = None
@@ -79,18 +77,9 @@ class DatasetParser:
         # Get all author names sorted by the number of texts
         self.authors = self.df['label'].value_counts().index.tolist()
 
-    def info(self, top: List[int]):
-        info = {
-            'total_num_of_texts': len(self.df),
-            'total_num_of_authors': len(self.authors),
-            'total_avg_text_length': round(self.df['text'].apply(len).mean(), 2),
-            'total_min_text_length': self.df['text'].apply(len).min(),
-            'total_max_text_length': self.df['text'].apply(len).max(),
-            'total_avg_texts_per_author': round(self.df['label'].value_counts().mean(), 2),
-            'total_min_texts_per_author': self.df['label'].value_counts().min(),
-            'total_max_texts_per_author': self.df['label'].value_counts().max(),
-        }
-        for i in top:
+    def info(self, graph: bool = False):
+        info = {}
+        for i in [5, 10, 20, 50]:
             top_authors = self.df['label'].value_counts().index[:i]
             info[f'top{i}_num_texts'] = self.df['label'].value_counts().loc[top_authors].sum()
             info[f'top{i}_avg_text_length'] = self.df[self.df['label'].isin(top_authors)]['text'].apply(len).mean()  # noqa
@@ -103,6 +92,23 @@ class DatasetParser:
         self.logger.info('Dataset information:')
         for key, value in info.items():
             self.logger.info(f"  {key}: {value}")
+
+
+        if graph:
+            num_of_texts = []
+            for author in self.df['label'].value_counts().index[:100]:
+                num_of_texts.append(len(self.df[self.df['label'] == author]))
+
+            authors = np.arange(1, 101)
+            plt.figure(figsize=(8, 4))
+            plt.bar(authors, num_of_texts, width=1.0)
+            plt.xticks(ticks=np.arange(0, 101, 20), fontsize=10)
+            plt.xticks(fontsize=10)
+            plt.grid(axis='y', linestyle='--', alpha=0.6)
+            plt.legend('', frameon=False)
+
+            plt.tight_layout()
+            plt.show()
 
     def create(self,
                output_dir: Path,
@@ -307,38 +313,4 @@ def _has_minimum_length(text: str) -> bool:
     encoding = tiktoken.encoding_for_model('gpt-4o')
     count = len(encoding.encode(text))
     return count > 60
-
-
-# def complete_finetune_data(dataset_path: Path, openai_api_key: Optional[str] = None):
-#     client = GPT4o.get_client(openai_api_key)
-#     df = pd.read_csv(dataset_path)
-#     results_df = df.copy()
-#     for i, row in df.iterrows():
-#         query = row['query_text']
-#         examples = row['example_text']
-#         correct_author = row['label']
-#         messages = copy.deepcopy(prompts.prompts_finetuning)
-#         messages[-1]['content'] = messages[-1]['content'].format(query=query,
-#                                                                  examples=examples,
-#                                                                  correct_author=correct_author)
-#         try:
-#             completion = client.chat.completions.create(
-#                 model=models.gpt_4o.MODEL_NAME,
-#                 messages=messages,
-#                 max_tokens=800,
-#                 temperature=0.0,
-#             )
-#             response = completion.choices[0].message
-#             if response.parsed:
-#                 result = cast(GPTResponse, response.parsed)
-#             elif response.content:
-#                 result = response.content
-#             else:
-#                 result = 'error'
-#         except Exception:
-#             result = 'error'
-#
-#         results_df.loc[i, 'finetune_response'] = result
-#
-#     results_df.to_csv(dataset_path.parent / (dataset_path.stem + '_complete.csv'))
 

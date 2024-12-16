@@ -13,8 +13,6 @@ from dotenv import load_dotenv
 from huggingface_hub import login
 from transformers import TrainingArguments
 from trl import SFTTrainer
-from unsloth import FastLanguageModel, is_bfloat16_supported
-from unsloth.chat_templates import get_chat_template
 
 import prompts
 from metrics import compute_metrics
@@ -34,12 +32,14 @@ def get_hf_token(hf_token: Optional[str] = None) -> str:
 
 class BaseLLM:
     def __init__(self,
+                 short_model_name: str,
                  output_dir: Path,
                  dataset_path: Path,
                  template: str,
                  max_tokens: int,
                  max_new_tokens: int,
                  logger: Optional[logging.Logger] = None):
+        self.short_model_name = short_model_name
         self.logger = logger or get_child_logger(__name__)
         self.output_dir = output_dir.resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -53,12 +53,16 @@ class BaseLLM:
         self.dataset = self._parse_dataset(df)
 
     @staticmethod
-    def _load_template(template: str) -> List[Dict[str, str]]:
+    def _load_template(template: str, short_model_name: Optional[str] = None) -> List[Dict[str, str]]:
         if template.lower() == 'en':
             return prompts.prompts_en
         if template.lower() == 'cz':
+            if short_model_name and 'gpt' in short_model_name.lower():
+                return prompts.prompts_cz_gpt
             return prompts.prompts_cz
         if template.lower() == 'cz-1shot':
+            if short_model_name and 'gpt' in short_model_name.lower():
+                return prompts.prompts_cz_1shot_gpt
             return prompts.prompts_cz_1shot
         raise ValueError('Invalid template. Available templates are: en, cz, or cz-1shot.')
 
@@ -144,9 +148,9 @@ class BaseLLM:
         }
         return avg, std
 
-    def save_results(self, model_name: str, results: List[pd.DataFrame], avg: Dict[str, float], std: Dict[str, float]):
+    def save_results(self, results: List[pd.DataFrame], avg: Dict[str, float], std: Dict[str, float]):
         reps = self.dataset.index.get_level_values(0).nunique()
-        filename = f'{model_name}_{self.num_of_authors}authors_{reps}reps_{self.template_name}.json'
+        filename = f'{self.short_model_name}_{self.num_of_authors}authors_{reps}reps_{self.template_name}.json'
         results_df = pd.concat(results, ignore_index=True)
         json_result = {
             'avg': avg,
@@ -181,11 +185,12 @@ class UnslothLLM(BaseLLM):
                  template: str,
                  hf_token: Optional[str] = None,
                  logger: Optional[logging.Logger] = None):
+        from unsloth import FastLanguageModel
+        from unsloth.chat_templates import get_chat_template
+
         os.environ['WANDB_MODE'] = 'disabled'  # disable wandb
         self.hf_token = get_hf_token(hf_token)
         login(self.hf_token)
-
-        self.short_model_name = short_model_name
 
         self.max_seq_length = 8192
 
@@ -212,6 +217,7 @@ class UnslothLLM(BaseLLM):
         self.tokenizer = get_chat_template(tokenizer, chat_template=chat_template)
 
         super().__init__(
+            short_model_name=short_model_name,
             output_dir=output_dir,
             dataset_path=dataset_path,
             template=template,
@@ -253,6 +259,7 @@ class UnslothLLM(BaseLLM):
         return dataset.train_test_split(test_size=0.1)
 
     def train(self, dataset_name: str, repo_id: str, epochs: int = 6):
+        from unsloth import is_bfloat16_supported
         dataset = self.load_finetuning_dataset(dataset_name)
 
         trainer = SFTTrainer(
@@ -315,6 +322,7 @@ class UnslothLLM(BaseLLM):
         return self.tokenizer.decode(outputs[0][prompt_length:], skip_special_tokens=True)
 
     def test(self):
+        from unsloth import FastLanguageModel
         FastLanguageModel.for_inference(self.model)
 
         result = []
@@ -334,6 +342,6 @@ class UnslothLLM(BaseLLM):
             result.append(responses_df)
 
         avg, std = self.evaluate(result)
-        self.save_results(self.short_model_name, result, avg, std)
+        self.save_results(result, avg, std)
         self.logger.info(f'Average: {avg}')
         self.logger.info(f'Standard deviation: {std}')

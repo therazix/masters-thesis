@@ -30,11 +30,12 @@ class GPT4o(BaseLLM):
         self.model_name = MODEL_NAME
         self.model_name_for_encoding = 'gpt-4o'
         super().__init__(
+            short_model_name='gpt4o',
             output_dir=output_dir,
             dataset_path=dataset_path,
             template=template,
             max_tokens=128000,
-            max_new_tokens=800,
+            max_new_tokens=1000,
             logger=get_child_logger(__name__, logger)
         )
 
@@ -59,7 +60,7 @@ class GPT4o(BaseLLM):
                 model=self.model_name,
                 messages=messages,
                 response_format=GPTResponse,
-                max_tokens=800,
+                max_tokens=1000,
                 temperature=0.0,
             )
             response = completion.choices[0].message
@@ -83,10 +84,7 @@ class GPT4o(BaseLLM):
     def test(self):
         result = []
         for rep, rep_data in self.dataset.groupby(level=0):
-            examples = json.dumps(
-                {row['label']: row['example_text'] for _, row in rep_data.iterrows()},
-                ensure_ascii=False
-            )
+            examples = '\n'.join(f'Autor {row["label"]}: {row["example_text"]}' for _, row in rep_data.iterrows())
             data = rep_data.sample(self.num_of_authors)
             responses = []
             for _, row in data.iterrows():
@@ -100,7 +98,7 @@ class GPT4o(BaseLLM):
             responses_df[['label', 'answer']] = responses_df[['label', 'answer']].astype(str)
             result.append(responses_df)
 
-        self.save_results('gpt4o', result)
         avg, std = self.evaluate(result)
+        self.save_results(result, avg, std)
         self.logger.info(f'Average: {avg}')
         self.logger.info(f'Standard deviation: {std}')

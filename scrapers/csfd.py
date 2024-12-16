@@ -46,11 +46,12 @@ class CSFDScraper(Scraper):
             '//h2[text()="Recenze"]/../following-sibling::div//div[@class="article-content"]//a[@class="user-title-name"]//@href')  # noqa
         return {self._parse_username_from_url(url): False for url in user_urls}
 
-    def _scrape_reviews(self, username: str, writer: csv.writer):
+    def _scrape_reviews(self, username: str, writer: csv.writer, limit: Optional[int] = None):
         page = 1
         reviews = 0
+        limit = limit or MAX_REVIEWS_PER_USER
 
-        while reviews < MAX_REVIEWS_PER_USER:
+        while reviews < limit:
             self.logger.debug(f"Scraping page #{page} of user '{username}'")
             html = self._get_html(f'https://www.csfd.cz/uzivatel/{username}/recenze/?page={page}')
 
@@ -74,7 +75,7 @@ class CSFDScraper(Scraper):
             time.sleep(self.sleep_time)
         self.logger.debug(f"Scraped {reviews} reviews of user '{username}' (limit reached)")
 
-    def scrape(self):
+    def scrape(self, limit: Optional[int] = None):
         self._init_directories()
         self.users = self.users or self._scrape_users()
         self.output_file = self.output_file or self.output_dir / f'csfd_{time.strftime("%y%m%d_%H%M%S")}.csv'  # noqa
@@ -93,7 +94,7 @@ class CSFDScraper(Scraper):
             writer = csv.writer(file, quoting=csv.QUOTE_MINIMAL)
             writer.writerow(('author', 'movie_id', 'text'))  # Header
             for i, user in enumerate(users_to_scrape):
-                self._scrape_reviews(user, writer)
+                self._scrape_reviews(user, writer, limit)
                 self.users[user] = True
                 self.save_state()
                 self.logger.info(f"Finished scraping of user '{user}' ({i + 1}/{user_count})")
