@@ -8,11 +8,6 @@ from typing import Optional, List
 import click
 
 import dataset_parser
-import models.ensemble
-import models.gpt_4o
-import models.llama3
-import models.mistral
-import models.xlm_roberta
 import scrapers.csfd
 import scrapers.reddit
 import scrapers.tn_cz
@@ -120,6 +115,11 @@ scrape.add_command(scrape_tncz)
 ### Training commands ###
 
 @click.command(name='xlm-roberta')
+@click.option('--model',
+              required=False,
+              type=str,
+              default='FacebookAI/xlm-roberta-base',
+              help='Name of the model to finetune (Hugging Face), or local path to a saved model.')
 @click.option('-o', '--output-dir',
               required=True,
               type=click.Path(file_okay=False, dir_okay=True, readable=True),
@@ -144,19 +144,20 @@ scrape.add_command(scrape_tncz)
               type=click.Path(file_okay=True, dir_okay=False, readable=True),
               callback=to_path,
               help='Testing set for the model. If not provided, final evaluation is skipped.')
-@click.option('--checkpoint',
+@click.option('--hub-model-id',
               required=False,
-              type=click.Path(file_okay=False, dir_okay=True, readable=True),
-              callback=to_path,
-              help='Checkpoint to resume training. Must be a directory.')
+              type=str,
+              default=None,
+              help='Hugging Face model repository ID for saving the finetuned model.')
 @click.pass_context
-def train_xlm_roberta(ctx: click.Context, output_dir: Path, training_set: Path,
+def train_xlm_roberta(ctx: click.Context, model: str, output_dir: Path, training_set: Path,
                       validation_set: Path, epochs: int, testing_set: Optional[Path] = None,
-                      checkpoint: Optional[Path] = None):
+                      hub_model_id: Optional[str] = None):
+    import models.xlm_roberta
     logger = ctx.obj['logger']
-    xlm_roberta = models.xlm_roberta.XLMRoberta.for_training(
-        output_dir, training_set, validation_set, testing_set, checkpoint, logger)
-    xlm_roberta.train(epochs=epochs)
+    xlm_roberta = models.xlm_roberta.XLMRoberta(
+        model, output_dir, training_set, validation_set, testing_set, epochs, hub_model_id, logger)
+    xlm_roberta.train()
 
 
 @click.command(name='ensemble')
@@ -183,6 +184,8 @@ def train_xlm_roberta(ctx: click.Context, output_dir: Path, training_set: Path,
 @click.pass_context
 def train_ensemble(ctx: click.Context, output_dir: Path, model: Path, training_set: Path,
                    testing_set: Optional[Path] = None):
+    import models.xlm_roberta
+    import models.ensemble
     logger = ctx.obj['logger']
     xlm_roberta = models.xlm_roberta.XLMRoberta.for_testing(
         output_dir, model, testing_set, logger)
@@ -234,6 +237,7 @@ def train_ensemble(ctx: click.Context, output_dir: Path, model: Path, training_s
 def train_mistral(ctx: click.Context, output_dir: Path, model_name: str, repo_id: str,
                     training_set: Path, testing_set: Path, template: str, epochs: int,
                     token: Optional[str] = None):
+    import models.mistral
     logger = ctx.obj['logger']
     mistral = models.mistral.Mistral(output_dir, testing_set, model_name, template, token, logger)
     mistral.train(str(training_set), repo_id, epochs)
@@ -284,6 +288,7 @@ def train_mistral(ctx: click.Context, output_dir: Path, model_name: str, repo_id
 def train_llama3(ctx: click.Context, output_dir: Path, model_name: str, repo_id: str,
                     training_set: Path, testing_set: Path, template: str, epochs: int,
                     token: Optional[str] = None):
+    import models.llama3
     logger = ctx.obj['logger']
     llama3 = models.llama3.Llama3(output_dir, testing_set, model_name, template, token, logger)
     llama3.train(str(training_set), repo_id, epochs)
@@ -321,6 +326,7 @@ train.add_command(train_llama3)
               help='Testing set for the model.')
 @click.pass_context
 def test_xlm_roberta(ctx: click.Context, output_dir: Path, model: Path, testing_set: Path):
+    import models.xlm_roberta
     logger = ctx.obj['logger']
     xlm_roberta = models.xlm_roberta.XLMRoberta.for_testing(output_dir, model, testing_set, logger)
     xlm_roberta.test()
@@ -344,6 +350,8 @@ def test_xlm_roberta(ctx: click.Context, output_dir: Path, model: Path, testing_
               help='Testing set for the model.')
 @click.pass_context
 def test_ensemble(ctx: click.Context, model: Path, classifiers_dir: Path, testing_set: Path):
+    import models.xlm_roberta
+    import models.ensemble
     logger = ctx.obj['logger']
     xlm_roberta = models.xlm_roberta.XLMRoberta.for_testing(Path('.'), model, testing_set, logger)
     ensemble = models.ensemble.Ensemble(xlm_roberta, logger)
@@ -379,6 +387,7 @@ def test_ensemble(ctx: click.Context, model: Path, classifiers_dir: Path, testin
 @click.pass_context
 def test_mistral(ctx: click.Context, output_dir: Path, testing_set: Path, model_name: str,
                    template: str, token: Optional[str] = None):
+    import models.mistral
     logger = ctx.obj['logger']
     mistral = models.mistral.Mistral(output_dir, testing_set, model_name, template, token, logger)
     mistral.test()
@@ -413,6 +422,7 @@ def test_mistral(ctx: click.Context, output_dir: Path, testing_set: Path, model_
 @click.pass_context
 def test_llama3(ctx: click.Context, output_dir: Path, testing_set: Path, model_name: str,
                    template: str, token: Optional[str] = None):
+    import models.llama3
     logger = ctx.obj['logger']
     llama3 = models.llama3.Llama3(output_dir, testing_set, model_name, template, token, logger)
     llama3.test()
@@ -442,6 +452,7 @@ def test_llama3(ctx: click.Context, output_dir: Path, testing_set: Path, model_n
 @click.pass_context
 def test_gpt4o(ctx: click.Context, output_dir: Path, testing_set: Path, template: str,
                openai_api_key: Optional[str] = None):
+    import models.gpt_4o
     logger = ctx.obj['logger']
     gpt4o = models.gpt_4o.GPT4o(output_dir, testing_set, template, openai_api_key, logger)
     gpt4o.test()
@@ -474,6 +485,7 @@ test.add_command(test_gpt4o)
               help='Output directory for processed dataset.')
 @click.option('-n', '--num-of-authors',
               required=True,
+              multiple=True,
               type=int,
               help='Number of authors to extract. Authors with the most texts are selected.')
 @click.option('-l', '--limit',
@@ -491,10 +503,11 @@ test.add_command(test_gpt4o)
               help='Add text features to the dataset.')
 @click.pass_context
 def dataset_create(ctx: click.Context, input_file: Path, output_dir: Optional[Path],
-                   num_of_authors: int, limit: Optional[int], add_out_of_class: bool,
+                   num_of_authors: List[int], limit: Optional[int], add_out_of_class: bool,
                    add_text_features: bool):
     logger = ctx.obj['logger']
     output_dir = output_dir or Path('datasets')
+    num_of_authors = [n for n in num_of_authors if n > 0]
     parser = dataset_parser.DatasetParser(input_file, logger)
     parser.create(output_dir, num_of_authors, limit, add_out_of_class, add_text_features, (0.7, 0.15, 0.15))
 

@@ -11,6 +11,9 @@ import pandas as pd
 from datasets import load_dataset, DatasetDict
 from dotenv import load_dotenv
 from huggingface_hub import login
+
+from unsloth import FastLanguageModel, is_bfloat16_supported
+from unsloth.chat_templates import get_chat_template
 from transformers import TrainingArguments
 from trl import SFTTrainer
 
@@ -185,8 +188,6 @@ class UnslothLLM(BaseLLM):
                  template: str,
                  hf_token: Optional[str] = None,
                  logger: Optional[logging.Logger] = None):
-        from unsloth import FastLanguageModel
-        from unsloth.chat_templates import get_chat_template
 
         os.environ['WANDB_MODE'] = 'disabled'  # disable wandb
         self.hf_token = get_hf_token(hf_token)
@@ -259,7 +260,6 @@ class UnslothLLM(BaseLLM):
         return dataset.train_test_split(test_size=0.1)
 
     def train(self, dataset_name: str, repo_id: str, epochs: int = 6):
-        from unsloth import is_bfloat16_supported
         dataset = self.load_finetuning_dataset(dataset_name)
 
         trainer = SFTTrainer(
@@ -322,7 +322,6 @@ class UnslothLLM(BaseLLM):
         return self.tokenizer.decode(outputs[0][prompt_length:], skip_special_tokens=True)
 
     def test(self):
-        from unsloth import FastLanguageModel
         FastLanguageModel.for_inference(self.model)
 
         result = []
